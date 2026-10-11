@@ -27,6 +27,8 @@ enum PairInfo: Equatable {
     case ready
     case needsDownload
     case unsupported
+
+    var canDownload: Bool { self == .needsDownload || self == .unknown }
 }
 
 /// One model for the whole droplet: the shelf widget and the settings pane
@@ -57,21 +59,22 @@ final class TranslateModel: ObservableObject {
     @Published private(set) var pairInfo: PairInfo = .unknown
 
     @Published var sourceID: String = TranslateModel.auto {
-        didSet {
-            persist("source", sourceID)
-            languageSelectionChanged()
-        }
+        didSet { languageChanged(key: "source", value: sourceID) }
     }
 
     @Published var targetID: String = LanguageTools.systemLanguageID() {
-        didSet {
-            persist("target", targetID)
-            languageSelectionChanged()
-        }
+        didSet { languageChanged(key: "target", value: targetID) }
     }
 
     @Published var liveTranslate = false {
         didSet { persist("live", liveTranslate) }
+    }
+
+    @Published var uiLanguage = "system" {
+        didSet {
+            persist("uiLanguage", uiLanguage)
+            L10n.override = Self.uiOverride(for: uiLanguage)
+        }
     }
 
     private var host: DropletHost?
@@ -90,15 +93,14 @@ final class TranslateModel: ObservableObject {
         sourceID = preferences.value(forKey: "source", default: Self.auto)
         targetID = preferences.value(forKey: "target", default: LanguageTools.systemLanguageID())
         liveTranslate = preferences.value(forKey: "live", default: false)
+        uiLanguage = preferences.value(forKey: "uiLanguage", default: "system")
+        L10n.override = Self.uiOverride(for: uiLanguage)
         self.host = host
         loadLanguages()
     }
 
     func teardown() {
-        translateTask?.cancel()
-        watchdog?.cancel()
-        liveTask?.cancel()
-        loadTask?.cancel()
+        cancelAll()
         synthesizer.stopSpeaking(at: .immediate)
         job = nil
         prepare = nil
@@ -178,16 +180,14 @@ final class TranslateModel: ObservableObject {
     func currentJob() -> TranslationJob? { job }
 
     func complete(jobID: UUID, text: String) {
-        guard job?.id == jobID else { return }
-        watchdog?.cancel()
+        guard takeJob(jobID) else { return }
         output = text
         status = .idle
         job = nil
     }
 
     func fail(jobID: UUID, message: String) {
-        guard job?.id == jobID else { return }
-        watchdog?.cancel()
+        guard takeJob(jobID) else { return }
         note(message)
         status = .failed
         job = nil
@@ -275,11 +275,7 @@ final class TranslateModel: ObservableObject {
             pairInfo = .ready
             return
         }
-        switch await TranslationBridge.pairStatus(source: source, target: targetID) {
-        case .installed: pairInfo = .ready
-        case .needsDownload: pairInfo = .needsDownload
-        case .unsupported: pairInfo = .unsupported
-        }
+        pairInfo = await TranslationBridge.pairStatus(source: source, target: targetID).pairInfo
     }
 
     func requestDownload() {
@@ -318,6 +314,27 @@ final class TranslateModel: ObservableObject {
     }
 
     // MARK: Helpers
+
+    private static func uiOverride(for id: String) -> String? { id == "system" ? nil : id }
+
+    private func languageChanged(key: String, value: String) {
+        persist(key, value)
+        languageSelectionChanged()
+    }
+
+    private func cancelAll() {
+        translateTask?.cancel()
+        watchdog?.cancel()
+        liveTask?.cancel()
+        loadTask?.cancel()
+    }
+
+    @discardableResult
+    private func takeJob(_ id: UUID) -> Bool {
+        guard job?.id == id else { return false }
+        watchdog?.cancel()
+        return true
+    }
 
     func note(_ message: String) {
         host?.log.info(message)

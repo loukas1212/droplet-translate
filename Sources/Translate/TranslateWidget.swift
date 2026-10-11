@@ -5,12 +5,13 @@ struct TranslateWidget: View {
     @ObservedObject var model: TranslateModel
     let context: ShelfWidgetContext
     let openSettings: () -> Void
+    private static let bodyFont = Font.system(size: 13)
 
     var body: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.sm) {
             header
             languageRow
-            if context.isCompact { compactTiles } else { fullTiles }
+            tiles.frame(maxHeight: .infinity)
         }
         .padding(context.contentInsets)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -45,13 +46,8 @@ struct TranslateWidget: View {
                 Image(systemName: "arrow.right")
             }
         }
-        .buttonStyle(TranslateCircleStyle(
-            diameter: diameter,
-            accent: .blue,
-            usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
-        ))
-        .help(L10n.tr("a11y.translate"))
-        .accessibilityLabel(L10n.tr("a11y.translate"))
+        .buttonStyle(TranslateCircleStyle(diameter: diameter, accent: .blue))
+        .a11y("a11y.translate")
     }
 
     // MARK: Languages
@@ -64,10 +60,9 @@ struct TranslateWidget: View {
             languageMenu(selection: $model.targetID, includesAuto: false, label: model.name(for: model.targetID))
             if !context.isCompact {
                 Spacer(minLength: DroppySpacing.md)
-                iconButton("doc.on.clipboard", label: "a11y.paste", diameter: 24) { model.pasteInput() }
-                iconButton("doc.on.doc", label: "a11y.copy", diameter: 24) { model.copyOutput() }
-                    .disabled(model.output.isEmpty)
-                iconButton("speaker.wave.2", label: "a11y.speak", diameter: 24) { model.toggleSpeech() }
+                pillButton("doc.on.clipboard", text: "paste", a11y: "a11y.paste") { model.pasteInput() }
+                pillButton("arrow.up.page.on.clipboard", text: "copy", a11y: "a11y.copy", disabled: model.output.isEmpty) { model.copyOutput() }
+                iconButton("speaker.wave.2.bubble.fill", label: "a11y.speak", diameter: 24) { model.toggleSpeech() }
                     .disabled(model.output.isEmpty)
             }
         }
@@ -96,10 +91,7 @@ struct TranslateWidget: View {
         }
         .menuStyle(.button)
         .menuIndicator(.hidden)
-        .buttonStyle(TranslatePillStyle(
-            height: 28,
-            usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
-        ))
+        .buttonStyle(TranslatePillStyle(height: 28))
     }
 
     private func iconButton(
@@ -109,38 +101,43 @@ struct TranslateWidget: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) { Image(systemName: symbol) }
-            .buttonStyle(TranslateCircleStyle(
-                diameter: diameter,
-                usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
-            ))
-            .help(L10n.tr(label))
-            .accessibilityLabel(L10n.tr(label))
+            .buttonStyle(TranslateCircleStyle(diameter: diameter))
+            .a11y(label)
+    }
+
+    private func pillButton(
+        _ symbol: String,
+        text: String,
+        a11y: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                Text(L10n.tr(text))
+            }
+        }
+        .buttonStyle(TranslatePillStyle(height: 24))
+        .a11y(a11y)
+        .disabled(disabled)
     }
 
     // MARK: Text
 
-    /// Solo: the text and its translation side by side.
-    private var fullTiles: some View {
-        HStack(spacing: DroppySpacing.sm) {
-            inputTile
-            outputTile
+    @ViewBuilder
+    private var tiles: some View {
+        if context.isCompact {
+            VStack(spacing: DroppySpacing.xsm) { inputTile; outputTile }
+        } else {
+            HStack(spacing: DroppySpacing.sm) { inputTile; outputTile }
         }
-        .frame(maxHeight: .infinity)
-    }
-
-    /// Paired: the room has space for one short exchange, stacked.
-    private var compactTiles: some View {
-        VStack(spacing: DroppySpacing.xsm) {
-            inputTile
-            outputTile
-        }
-        .frame(maxHeight: .infinity)
     }
 
     private var inputTile: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $model.input)
-                .font(.system(size: 13))
+                .font(Self.bodyFont)
                 .scrollContentBackground(.hidden)
                 .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
                 // Return translates, Shift-Return adds a line.
@@ -151,7 +148,7 @@ struct TranslateWidget: View {
                 }
             if model.input.isEmpty {
                 Text(L10n.tr("placeholder"))
-                    .font(.system(size: 13))
+                    .font(Self.bodyFont)
                     .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
                     .padding(.leading, 5)
                     .padding(.top, 8)
@@ -170,19 +167,16 @@ struct TranslateWidget: View {
                     .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
                 if model.status == .needsDownload {
                     Button(L10n.tr("status.download")) { openSettings() }
-                        .buttonStyle(TranslatePillStyle(
-                            height: 24,
-                            usesAdaptiveForegrounds: context.usesAdaptiveForegrounds
-                        ))
+                        .buttonStyle(TranslatePillStyle(height: 24))
                 }
             } else if model.output.isEmpty {
                 Text(L10n.tr("output.placeholder"))
-                    .font(.system(size: 13))
+                    .font(Self.bodyFont)
                     .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
             } else {
                 ScrollView {
                     Text(model.output)
-                        .font(.system(size: 13))
+                        .font(Self.bodyFont)
                         .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -197,19 +191,24 @@ struct TranslateWidget: View {
     /// Messages shown in place of the translation. `.sameLanguage` keeps the
     /// text in the output, so it is a note, not a replacement.
     private var statusMessage: String? {
+        let key: String?
         switch model.status {
-        case .needsDownload: L10n.tr("status.needsDownload")
-        case .unsupported: L10n.tr("status.unsupported")
-        case .undetected: L10n.tr("status.undetected")
-        case .failed: L10n.tr("status.failed")
-        case .osTooOld: L10n.tr("status.old")
-        case .sameLanguage: L10n.tr("status.same")
-        case .idle, .translating: nil
+        case .needsDownload: key = "needsDownload"
+        case .unsupported: key = "unsupported"
+        case .undetected: key = "undetected"
+        case .failed: key = "failed"
+        case .osTooOld: key = "old"
+        case .sameLanguage: key = "same"
+        case .idle, .translating: key = nil
         }
+        return key.map { L10n.tr("status.\($0)") }
     }
 }
 
 private extension View {
+    func a11y(_ key: String) -> some View {
+        help(L10n.tr(key)).accessibilityLabel(L10n.tr(key))
+    }
     /// A raised surface inside the widget. Not a frame around it: the root
     /// of the widget stays bare on the shelf's black.
     func tile() -> some View {

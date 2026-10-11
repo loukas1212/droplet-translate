@@ -4,7 +4,6 @@ import SwiftUI
 struct TranslateCircleStyle: ButtonStyle {
     var diameter: CGFloat
     var accent: Color? = nil
-    var usesAdaptiveForegrounds = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -18,7 +17,6 @@ struct TranslateCircleStyle: ButtonStyle {
 
 struct TranslatePillStyle: ButtonStyle {
     var height: CGFloat
-    var usesAdaptiveForegrounds = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label

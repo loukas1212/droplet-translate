@@ -11,6 +11,14 @@ enum PairStatus: Equatable, Sendable {
     case installed
     case needsDownload
     case unsupported
+
+    var pairInfo: PairInfo {
+        switch self {
+        case .installed: .ready
+        case .needsDownload: .needsDownload
+        case .unsupported: .unsupported
+        }
+    }
 }
 
 /// Language helpers that work on every supported macOS.
@@ -45,13 +53,16 @@ enum LanguageTools {
         return true
     }
 
+    static func options(for ids: [String]) -> [LanguageOption] {
+        ids.map { LanguageOption(id: $0, name: name(for: $0)) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     /// Shown until the system answers, and when it cannot.
-    static let fallback: [LanguageOption] = [
+    static let fallback: [LanguageOption] = options(for: [
         "ar", "zh-Hans", "zh-Hant", "nl", "en", "fr", "de", "hi", "id", "it",
         "ja", "ko", "pl", "pt-BR", "ru", "es", "th", "tr", "uk", "vi",
-    ]
-    .map { LanguageOption(id: $0, name: name(for: $0)) }
-    .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    ])
 }
 
 @available(macOS 15.0, *)
@@ -59,11 +70,8 @@ enum TranslationBridge {
     static func supportedLanguages() async -> [LanguageOption] {
         let languages = await LanguageAvailability().supportedLanguages
         var seen = Set<String>()
-        return languages
-            .map(\.minimalIdentifier)
-            .filter { seen.insert($0).inserted }
-            .map { LanguageOption(id: $0, name: LanguageTools.name(for: $0)) }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let ids = languages.map(\.minimalIdentifier).filter { seen.insert($0).inserted }
+        return LanguageTools.options(for: ids)
     }
 
     static func pairStatus(source: String, target: String) async -> PairStatus {
@@ -102,6 +110,15 @@ enum TranslationBridge {
 // model publishes a job and these invisible modifiers carry it out.
 
 @available(macOS 15.0, *)
+private func nextConfig(
+    _ current: TranslationSession.Configuration?,
+    source: String,
+    target: String
+) -> TranslationSession.Configuration {
+    TranslationBridge.configuration(replacing: current, source: source, target: target)
+}
+
+@available(macOS 15.0, *)
 private struct TranslationRunner: ViewModifier {
     @ObservedObject var model: TranslateModel
     @State private var configuration: TranslationSession.Configuration?
@@ -110,11 +127,7 @@ private struct TranslationRunner: ViewModifier {
         content
             .onChange(of: model.job) { _, job in
                 guard let job else { return }
-                configuration = TranslationBridge.configuration(
-                    replacing: configuration,
-                    source: job.source,
-                    target: job.target
-                )
+                configuration = nextConfig(configuration, source: job.source, target: job.target)
             }
             .translationTask(configuration) { session in
                 // The closure runs on the main actor, `translate` does not. The
@@ -140,11 +153,7 @@ private struct TranslationPreparer: ViewModifier {
         content
             .onChange(of: model.prepare) { _, request in
                 guard let request else { return }
-                configuration = TranslationBridge.configuration(
-                    replacing: configuration,
-                    source: request.source,
-                    target: request.target
-                )
+                configuration = nextConfig(configuration, source: request.source, target: request.target)
             }
             .translationTask(configuration) { session in
                 // Shows the system download sheet. Only ever mounted in the

@@ -2,10 +2,14 @@ import Foundation
 
 /// this code runs in Droppy's process and `Bundle.main` is Droppy.
 enum L10n {
-    static func tr(_ key: String) -> String {
-        let language = Bundle.main.preferredLocalizations.first ?? "en"
-        if language.hasPrefix("fr"), let value = fr[key] { return value }
+    nonisolated(unsafe) static var override: String?
+    private static func lookup(_ key: String, french: Bool) -> String {
+        if french, let value = fr[key] { return value }
         return en[key] ?? key
+    }
+    static func tr(_ key: String) -> String {
+        if let o = override { return lookup(key, french: o.hasPrefix("fr")) }
+        return lookup(key, french: (Bundle.main.preferredLocalizations.first ?? "en").hasPrefix("fr"))
     }
 
     private static let en: [String: String] = [
@@ -19,6 +23,9 @@ enum L10n {
         "a11y.paste": "Paste",
         "a11y.copy": "Copy translation",
         "a11y.speak": "Speak translation",
+        "speak": "Listen",
+        "copy": "Copy",
+        "paste": "Paste",
         "status.needsDownload": "These languages aren't downloaded yet.",
         "status.download": "Download languages",
         "status.unsupported": "This language pair isn't supported.",
@@ -40,6 +47,8 @@ enum L10n {
         "settings.download": "Download languages",
         "settings.search.source": "Source language",
         "settings.search.target": "Target language",
+        "settings.ui": "Interface language",
+        "settings.ui.system": "Follow Droppy",
     ]
 
     private static let fr: [String: String] = [
@@ -53,6 +62,9 @@ enum L10n {
         "a11y.paste": "Coller",
         "a11y.copy": "Copier la traduction",
         "a11y.speak": "Lire la traduction",
+        "speak": "Écouter",
+        "copy": "Copier",
+        "paste": "Coller",
         "status.needsDownload": "Ces langues ne sont pas encore téléchargées.",
         "status.download": "Télécharger les langues",
         "status.unsupported": "Cette paire de langues n'est pas prise en charge.",
@@ -74,5 +86,7 @@ enum L10n {
         "settings.download": "Télécharger les langues",
         "settings.search.source": "Langue source",
         "settings.search.target": "Langue cible",
+        "settings.ui": "Langue de l'interface",
+        "settings.ui.system": "Suivre Droppy",
     ]
 }
