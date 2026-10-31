@@ -1,16 +1,25 @@
 {
   "id": "translate",
   "name": "Translate",
-  "version": "1.1.0",
-  "summary": "Translate text on the shelf, on your Mac, totally offline",
-  "description": "Type or paste text on the shelf and translate it between any two languages you choose, entirely on your Mac. Auto-detect the source language, swap languages in one click, translate while typing, and copy, paste, or listen to results. Powered by Apple's on-device Translation framework, no network, accounts, or API keys, nothing ever leaves your Mac.",
+  "version": "1.2.0",
+  "summary": "Translate on the shelf, on your Mac, offline or with your AI",
+  "description": "Type or paste text on the shelf and translate it between any two languages you choose. Apple's on-device models do the work entirely on your Mac, so nothing leaves it; when you want more, you can point the droplet at your own AI provider instead. Auto-detect the source language, swap languages in one click, translate while typing, and copy or paste results.",
   "category": "Productivity",
   "kit": {
     "abi": 1,
     "minAPI": "1.20.1"
   },
   "minAppVersion": "16.0.1",
-  "capabilities": [],
+  "capabilities": [
+    "screen-capture",
+    "accessibility",
+    "clipboard-read",
+    "clipboard-write",
+    "network-client",
+    "shelf-read",
+    "shelf-write",
+    "global-shortcuts"
+  ],
   "surfaces": [
     "shelf-widget",
     "settings-pane"
