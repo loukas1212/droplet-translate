@@ -18,6 +18,39 @@ struct PanelRenderTests {
             .appendingPathComponent("translate-panel-shots", isDirectory: true)
     }
 
+    @Test("The more menu's glass starts on the disc and slides into its rectangle")
+    func moreMenuGlassSlidesOutOfTheDisc() {
+        let lift = PanelFooterMetrics.footerHeight
+        let menuWidth = PanelMoreMenu(model: TranslateModel(), open: false).width
+        // Four rows, the air between them, and the menu's edge inset.
+        let menuHeight: CGFloat = 146
+        let background = CGRect(x: 0, y: 0, width: menuWidth, height: menuHeight + lift)
+
+        let closed = PanelMenuMorphShape(progress: 0, lift: lift)
+            .path(in: background)
+            .boundingRect
+        let disc = CGRect(
+            x: background.minX,
+            y: menuHeight + PanelFooterMetrics.rim,
+            width: PanelFooterMetrics.disc,
+            height: PanelFooterMetrics.disc
+        )
+        #expect(closed == disc, "the menu's glass does not start on the disc")
+
+        let open = PanelMenuMorphShape(progress: 1, lift: lift)
+            .path(in: background)
+            .boundingRect
+        #expect(open == CGRect(x: 0, y: 0, width: menuWidth, height: menuHeight))
+        // The glass travels the whole footer: the circle rises into the card.
+        #expect(closed.maxY - open.maxY == lift)
+
+        let half = PanelMenuMorphShape(progress: 0.5, lift: lift)
+            .path(in: background)
+            .boundingRect
+        #expect(half.maxY > open.maxY && half.maxY < closed.maxY)
+        #expect(half.width > closed.width && half.width < open.width)
+    }
+
     @Test("The panel's result and terminal statuses draw")
     func thePanelDraws() throws {
         let folder = Self.folder
@@ -35,7 +68,7 @@ struct PanelRenderTests {
                 onClose: {},
                 onPin: {}
             ),
-            size: CGSize(width: 460, height: 273),
+            size: CGSize(width: 460, height: ResultWindowView.minimumHeightWithOriginal),
             named: "panel-result"
         )
         // The result alone, measured at the panel's fixed width: the target
@@ -52,7 +85,7 @@ struct PanelRenderTests {
                 onClose: {},
                 onPin: {}
             ),
-            size: CGSize(width: 460, height: 246),
+            size: CGSize(width: 460, height: ResultWindowView.minimumHeight),
             named: "panel-result-only"
         )
         // The footer's menu on the themed card, as the settings picture draws
@@ -73,7 +106,7 @@ struct PanelRenderTests {
                 onClose: {},
                 onPin: {}
             ),
-            size: CGSize(width: 460, height: 273),
+            size: CGSize(width: 460, height: ResultWindowView.minimumHeightWithOriginal),
             named: "panel-more-menu"
         )
         let menuShortModel = TranslateModel()
@@ -91,7 +124,7 @@ struct PanelRenderTests {
                 onClose: {},
                 onPin: {}
             ),
-            size: CGSize(width: 460, height: 246),
+            size: CGSize(width: 460, height: ResultWindowView.minimumHeight),
             named: "panel-more-menu-short"
         )
         let failed = try Self.draw(
@@ -163,6 +196,44 @@ struct PanelRenderTests {
         #expect(!SidePanel.foldsOnDismissal(isPinned: true))
         #expect(SidePanel.foldsOnDismissal(isPinned: false))
         #expect(SidePanel.foldsOnDismissal(isPinned: true, respectingPin: false))
+    }
+
+    @Test("A press on a pinned card takes the foreground back")
+    func pinnedCardPressTakesFocusBack() {
+        let panel = SidePanel.shared
+        panel.ignoresMouseEvents = true
+        #expect(panel.ignoresMouseEvents, "an unpinned card follows the host's mask")
+        // The card stays live while another app is in front; the press only has
+        // to bring Droppy forward so the control under the pointer takes it.
+        #expect(SidePanel.takesFocusBack(
+            isPinned: true, isExpanded: true, appIsActive: false
+        ))
+        #expect(!SidePanel.takesFocusBack(
+            isPinned: true, isExpanded: true, appIsActive: true
+        ))
+        #expect(!SidePanel.takesFocusBack(
+            isPinned: true, isExpanded: false, appIsActive: false
+        ))
+        #expect(!SidePanel.takesFocusBack(
+            isPinned: false, isExpanded: true, appIsActive: false
+        ))
+        #expect(SidePanel.isPress(.leftMouseDown))
+        #expect(SidePanel.isPress(.rightMouseDown))
+        #expect(!SidePanel.isPress(.mouseMoved))
+        // The host may mask a background droplet's window; a pinned card keeps
+        // its clicks so the unpin row is reachable.
+        #expect(SidePanel.keepsClicks(isPinned: true, isExpanded: true))
+        #expect(!SidePanel.keepsClicks(isPinned: false, isExpanded: true))
+        #expect(!SidePanel.keepsClicks(isPinned: true, isExpanded: false))
+    }
+
+    @Test("An open card keeps the glass's clear face after unpinning")
+    func openCardHoldsKeyAppearance() {
+        #expect(PanelKeyAppearance.shouldHold(pinned: true, shown: true))
+        // The pin keeps the card open; it does not own the face. Unpinning an
+        // open card must not flip it to the system's frosted glass.
+        #expect(PanelKeyAppearance.shouldHold(pinned: false, shown: true))
+        #expect(!PanelKeyAppearance.shouldHold(pinned: false, shown: false))
     }
 
     @Test("The card opens and folds back onto the tab")
@@ -708,9 +779,9 @@ struct PanelRenderTests {
                     shelfStep: .full
                 )
                     .padding(8)
-                    .frame(width: width, height: 434)
+                    .frame(width: width, height: ShelfHeightStep.full.height)
                     .background(Color.black),
-                size: CGSize(width: width, height: 434),
+                size: CGSize(width: width, height: ShelfHeightStep.full.height),
                 named: name
             )
             #expect(shot > 0, "the shelf's \(name) card drew nothing")
@@ -722,9 +793,9 @@ struct PanelRenderTests {
         let shot = try Self.draw(
             TranslateWidget(model: TranslateModel())
                 .padding(8)
-                .frame(width: 440, height: 246)
+                .frame(width: 440, height: ShelfHeightStep.compact.height)
                 .background(Color.black),
-            size: CGSize(width: 440, height: 246),
+            size: CGSize(width: 440, height: ShelfHeightStep.compact.height),
             named: "shelf-step-1"
         )
         #expect(shot > 0, "the closed shelf card drew nothing")
@@ -732,24 +803,70 @@ struct PanelRenderTests {
 
     @Test("The shelf's capsule cycles the three card heights")
     func shelfStepsCycle() {
-        #expect(ShelfHeightStep.compact.height == 246)
-        #expect(ShelfHeightStep.medium.height == 434)
-        #expect(ShelfHeightStep.full.height == ShelfHeightStep.medium.height)
-        #expect(ShelfHeightStep.compact.contentHeight == 230)
-        #expect(ShelfHeightStep.medium.contentHeight == 418)
-        #expect(ShelfHeightStep.full.contentHeight == 418)
+        #expect(ShelfHeightStep.compact.height == 250)
+        #expect(ShelfHeightStep.medium.height == 440)
+        #expect(ShelfHeightStep.full.height == 480)
+        #expect(ShelfHeightStep.compact.contentHeight == 234)
+        #expect(ShelfHeightStep.medium.contentHeight == 424)
+        #expect(ShelfHeightStep.full.contentHeight == 464)
+        // The boxes fill the round cards: the tall input alone, the short
+        // input beside the result, then the result on the whole face.
+        #expect(ShelfHeightStep.compact.room == 154)
+        #expect(ShelfHeightStep.medium.room == 344)
+        #expect(ShelfHeightStep.full.room == 424)
         #expect(ShelfHeightStep.compact.next == .medium)
         #expect(ShelfHeightStep.medium.next == .full)
         #expect(ShelfHeightStep.full.next == .compact)
         // The boxes read their growth from the card's real height, so the
         // window between the two heights must normalize on both shapes.
-        #expect(ShelfHeightStep.growth(forHeight: 230, hostInset: 16) == 0)
-        #expect(ShelfHeightStep.growth(forHeight: 418, hostInset: 16) == 1)
-        #expect(ShelfHeightStep.growth(forHeight: 324, hostInset: 16) == 0.5)
-        #expect(ShelfHeightStep.growth(forHeight: 246, hostInset: 0) == 0)
-        #expect(ShelfHeightStep.growth(forHeight: 434, hostInset: 0) == 1)
+        #expect(ShelfHeightStep.growth(forHeight: 234, hostInset: 16) == 0)
+        #expect(ShelfHeightStep.growth(forHeight: 424, hostInset: 16) == 1)
+        #expect(ShelfHeightStep.growth(forHeight: 329, hostInset: 16) == 0.5)
+        #expect(ShelfHeightStep.growth(forHeight: 250, hostInset: 0) == 0)
+        #expect(ShelfHeightStep.growth(forHeight: 440, hostInset: 0) == 1)
         #expect(ShelfHeightStep.growth(forHeight: 100, hostInset: 16) == 0)
         #expect(ShelfHeightStep.growth(forHeight: 900, hostInset: 16) == 1)
+    }
+
+    @Test("Every box's words share one margin and edge fade")
+    func tileTextRecipeIsShared() {
+        #expect(PanelTileText.sideInset == 8)
+        #expect(PanelTileText.verticalAir == 16)
+        // The input's 10% at its resting height, capped so a tall result keeps
+        // the same rim.
+        #expect(abs(PanelTileText.fadeBand(for: 94) - 9.4) < 0.0001)
+        #expect(PanelTileText.fadeBand(for: 160) == 16)
+        #expect(PanelTileText.fadeBand(for: 420) == 16)
+        // The top air is the band's full height, so the first line never sits
+        // under the fade.
+        #expect(PanelTileText.verticalAir == PanelTileText.fadeBand(for: 420))
+    }
+
+    @Test("The panels' standard card heights are round numbers")
+    func panelCardHeightsAreRound() {
+        // The floating panel: the result alone, then the original above it.
+        #expect(ResultWindowView.minimumHeight == 250)
+        #expect(ResultWindowView.minimumHeightWithOriginal == 280)
+
+        // The edge panel: opens empty, grows with the input, then holds the
+        // result with the input at its floor and at its cap.
+        #expect(
+            SidePanel.cardHeight(forBody: SidePanelContentView.panelMinBodyHeight) == 300
+        )
+        #expect(
+            SidePanel.cardHeight(forBody: SidePanelContentView.panelMaxInputBodyHeight) == 330
+        )
+        #expect(
+            SidePanel.cardHeight(
+                forBody: SidePanelContentView.bodyHeight(
+                    forBox: SidePanelContentView.panelBoxFloor,
+                    result: true
+                )
+            ) == 550
+        )
+        #expect(
+            SidePanel.cardHeight(forBody: SidePanelContentView.maxPanelBodyHeight) == 580
+        )
     }
 
     @Test("A drag down on the shelf's grip grows the card, up shrinks it")
@@ -767,15 +884,23 @@ struct PanelRenderTests {
         #expect(ShelfHeightStep.medium.dragged(.up, canTranslate: false) == .compact)
     }
 
+    @Test("The shelf's grip travels as far up as down")
+    func shelfGripPullIsEven() {
+        let range = SidePanelContentView.shelfGripPullRange
+        #expect(range.lowerBound == -SidePanelContentView.shelfGripLift)
+        #expect(range.upperBound == SidePanelContentView.shelfGripLift)
+        #expect(range.contains(0))
+    }
+
     @Test("Return in the shelf translates and opens the result")
     func shelfReturnTranslates() throws {
         let model = TranslateModel()
         let hosting = NSHostingView(
             rootView: TranslateWidget(model: model)
                 .padding(8)
-                .frame(width: 440, height: 246)
+                .frame(width: 440, height: ShelfHeightStep.compact.height)
         )
-        hosting.frame = CGRect(x: 0, y: 0, width: 440, height: 246)
+        hosting.frame = CGRect(x: 0, y: 0, width: 440, height: ShelfHeightStep.compact.height)
         let window = NSWindow(
             contentRect: hosting.frame,
             styleMask: [.borderless],
@@ -829,9 +954,9 @@ struct PanelRenderTests {
                 onShelfStep: { log.steps.append($0) }
             )
             .padding(8)
-            .frame(width: 440, height: 434)
+            .frame(width: 440, height: ShelfHeightStep.full.height)
         )
-        hosting.frame = CGRect(x: 0, y: 0, width: 440, height: 434)
+        hosting.frame = CGRect(x: 0, y: 0, width: 440, height: ShelfHeightStep.full.height)
         let window = NSWindow(
             contentRect: hosting.frame,
             styleMask: [.borderless],
@@ -861,9 +986,9 @@ struct PanelRenderTests {
             translated: "ฝนตกในสเปนส่วนใหญ่บนที่ราบ"
         )
         for (step, height, name) in [
-            (ShelfHeightStep.compact, CGFloat(246), "shelf-step-1-result"),
-            (.medium, 434, "shelf-step-2"),
-            (.full, 434, "shelf-step-3")
+            (ShelfHeightStep.compact, ShelfHeightStep.compact.height, "shelf-step-1-result"),
+            (.medium, ShelfHeightStep.medium.height, "shelf-step-2"),
+            (.full, ShelfHeightStep.full.height, "shelf-step-3")
         ] {
             let shot = try Self.draw(
                 TranslateWidget(model: model, shelfStep: step)
@@ -880,9 +1005,9 @@ struct PanelRenderTests {
         // height and the footer stays on the card's bottom edge.
         let island = try Self.draw(
             TranslateWidget(model: model, shelfStep: .full)
-                .frame(width: 440, height: 434)
+                .frame(width: 440, height: ShelfHeightStep.full.height)
                 .background(Color.black),
-            size: CGSize(width: 440, height: 434),
+            size: CGSize(width: 440, height: ShelfHeightStep.full.height),
             named: "shelf-step-3-island"
         )
         #expect(island > 0, "the solo island shelf card drew nothing")
@@ -913,7 +1038,7 @@ struct PanelRenderTests {
             origin: .zero,
             size: CGSize(
                 width: SidePanel.expandedWidth - SidePanelContentView.inset * 2,
-                height: SidePanelContentView.maxBodyHeight
+                height: SidePanelContentView.panelMaxInputBodyHeight
             )
         )
         let window = NSWindow(
@@ -931,7 +1056,7 @@ struct PanelRenderTests {
         // The editor reports its own measured height; the card is small, not capped.
         #expect(
             (heights.last ?? 0) >= SidePanelContentView.panelMinBodyHeight
-                && (heights.last ?? 0) < SidePanelContentView.maxBodyHeight,
+                && (heights.last ?? 0) < SidePanelContentView.panelMaxInputBodyHeight,
             "an empty box should leave the panel at its smallest"
         )
 
@@ -943,13 +1068,13 @@ struct PanelRenderTests {
         // loop for seconds, so give the height callback room before calling it
         // short.
         let deadline = Date().addingTimeInterval(30)
-        while (heights.last ?? 0) < SidePanelContentView.maxBodyHeight, Date() < deadline {
+        while (heights.last ?? 0) < SidePanelContentView.panelMaxInputBodyHeight, Date() < deadline {
             hosting.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(50))
         }
 
         #expect(
-            heights.last == SidePanelContentView.maxBodyHeight,
+            heights.last == SidePanelContentView.panelMaxInputBodyHeight,
             "long text should stop the card at the box cap, not grow past it"
         )
         window.orderOut(nil)
@@ -967,7 +1092,12 @@ struct PanelRenderTests {
 
     @Test("The floating panel blooms on a radius from its point")
     func panelBloomsFromItsPoint() {
-        let card = NSRect(x: 0, y: 0, width: 460, height: 273)
+        let card = NSRect(
+            x: 0,
+            y: 0,
+            width: 460,
+            height: ResultWindowView.minimumHeightWithOriginal
+        )
         let point = CGPoint(x: 120, y: 300)
 
         let dot = TranslationPanel.bloomRect(card: card, around: point, at: 0)
@@ -1025,7 +1155,12 @@ struct PanelRenderTests {
                 chipState: chip
             )
         )
-        hosting.frame = CGRect(x: 0, y: 0, width: 460, height: 273)
+        hosting.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: 460,
+            height: ResultWindowView.minimumHeightWithOriginal
+        )
         let window = NSWindow(
             contentRect: hosting.frame,
             styleMask: [.borderless],
@@ -1123,7 +1258,7 @@ struct PanelRenderTests {
         let cap = SidePanelContentView.maxResultHeight(forBox: box)
 
         #expect(
-            cap == resting + SidePanelContentView.maxBoxHeight - box,
+            cap == resting + SidePanelContentView.panelMaxBoxHeight - box,
             "the default input box leaves the rest of the tallest card for the result"
         )
         #expect(
@@ -1178,7 +1313,7 @@ struct PanelRenderTests {
             "a half fold does not clear"
         )
         #expect(
-            SidePanelContentView.maxResultHeight(forBox: SidePanelContentView.maxBoxHeight) == resting,
+            SidePanelContentView.maxResultHeight(forBox: SidePanelContentView.panelMaxBoxHeight) == resting,
             "a full input box leaves the result at its resting height"
         )
 
@@ -1307,7 +1442,7 @@ struct PanelRenderTests {
             origin: .zero,
             size: CGSize(
                 width: SidePanel.expandedWidth - SidePanelContentView.inset * 2,
-                height: SidePanelContentView.maxBodyHeight
+                height: SidePanelContentView.maxPanelBodyHeight
             )
         )
         let window = NSWindow(
@@ -1606,6 +1741,185 @@ struct PanelRenderTests {
         #expect(TranslationPanel.shared.canBecomeMain)
     }
 
+    @Test("The floating panel grows with its result, up to its cap")
+    func floatingPanelCardHeights() {
+        let width = SidePanel.expandedWidth
+        let short = "The rain in Spain falls mainly on the plain."
+        let long = Array(repeating: short, count: 24).joined(separator: " ")
+        let huge = Array(repeating: short, count: 120).joined(separator: " ")
+        let source = "ฝนในสเปนตกหลักบนที่ราบ"
+
+        func height(_ translated: String, _ source: String) -> CGFloat {
+            ResultWindowView.cardHeight(
+                forWidth: width,
+                translated: translated,
+                source: source,
+                showsOriginal: !source.isEmpty
+            )
+        }
+
+        #expect(height(short, "") == ResultWindowView.minimumHeight)
+        #expect(height(short, source) == ResultWindowView.minimumHeightWithOriginal)
+
+        let longBare = height(long, "")
+        #expect(longBare > ResultWindowView.minimumHeight)
+        #expect(longBare < ResultWindowView.maximumHeight)
+        #expect(height(huge, "") == ResultWindowView.maximumHeight)
+
+        // The original takes its share before the result, never past the cap.
+        let longSource = height(long, source)
+        #expect(longSource > longBare)
+        #expect(longSource <= ResultWindowView.maximumHeight)
+        #expect(height(huge, source) == ResultWindowView.maximumHeight)
+    }
+
+    @Test("A floating panel's long result scrolls under a capped source")
+    func floatingPanelScrollsLongResults() throws {
+        let short = "The rain in Spain falls mainly on the plain."
+        let huge = Array(repeating: short, count: 120).joined(separator: " ")
+        let source = Array(
+            repeating: "ฝนในสเปนตกหลักบนที่ราบ",
+            count: 12
+        ).joined(separator: " ")
+        let width = SidePanel.expandedWidth
+        let height = ResultWindowView.cardHeight(
+            forWidth: width,
+            translated: huge,
+            source: source,
+            showsOriginal: true
+        )
+        #expect(height == ResultWindowView.maximumHeight)
+
+        let hosting = NSHostingView(
+            rootView: ResultWindowView(
+                model: TranslateModel(),
+                translated: huge,
+                source: source,
+                sourceName: "Thai",
+                pinned: false,
+                showsOriginal: true,
+                onCopy: {},
+                onClose: {},
+                onPin: {}
+            )
+        )
+        hosting.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        let window = NSWindow(
+            contentRect: hosting.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hosting
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        hosting.layoutSubtreeIfNeeded()
+
+        let scrolls = Self.scrolls(in: hosting)
+        #expect(scrolls.count == 2, "the panel needs a source and a result scroll view")
+        for scroll in scrolls {
+            #expect(scroll.contentView is VerticalOnlyClipView, "the panel can scroll sideways")
+            #expect(!scroll.hasHorizontalScroller)
+        }
+        // The source comes first in the card.
+        let sourceScroll = try #require(scrolls.first)
+        let resultScroll = try #require(scrolls.last)
+        // The tile now keeps the fade's air inside itself, so the cap is the
+        // text's room under that air, not the tile's frame.
+        #expect(
+            sourceScroll.frame.height - PanelTileText.verticalAir * 2
+                <= ResultWindowView.sourceTextCap + 0.5,
+            "the original took the result's room"
+        )
+        #expect(
+            (resultScroll.documentView?.frame.height ?? 0) > resultScroll.contentSize.height,
+            "the long result has nothing to scroll"
+        )
+        #expect(resultScroll.hasVerticalScroller, "the long result lost its knob")
+        window.orderOut(nil)
+    }
+
+    @Test("A window-drawn card leaves its content transparent")
+    func windowSurfaceSitsBehindTheContent() throws {
+        let size = CGSize(width: SidePanel.expandedWidth, height: ResultWindowView.minimumHeight)
+        func alpha(_ backdrop: PanelBackdrop) throws -> CGFloat {
+            let view = ResultWindowView(
+                model: TranslateModel(),
+                translated: "The rain in Spain falls mainly on the plain.",
+                source: "ฝนในสเปนตกหลักบนที่ราบ",
+                sourceName: "Thai",
+                pinned: false,
+                showsOriginal: true,
+                backdrop: backdrop,
+                onCopy: {},
+                onClose: {},
+                onPin: {}
+            )
+            let rep = try Self.bitmap(view, size: size)
+            // Just inside the card's left edge, where the content has no ink.
+            return rep.colorAt(x: 2, y: Int(size.height / 2))?.alphaComponent ?? -1
+        }
+        #expect(try alpha(.windowSurface) == 0, "the content still paints a card over the window's glass")
+        #expect(try alpha(.hostGlassOnBlack) > 0.9, "the settings picture lost its card")
+    }
+
+    @Test("The side panel's result opens at the top and scrolls down")
+    func sidePanelResultStartsAtTop() throws {
+        let model = TranslateModel()
+        model.beginPreview(
+            source: "en",
+            target: "th",
+            text: "The rain in Spain falls mainly on the plain.",
+            translated: Array(
+                repeating: "ฝนตกในสเปนส่วนใหญ่บนที่ราบ",
+                count: 40
+            ).joined(separator: " ")
+        )
+        let hosting = NSHostingView(
+            rootView: SidePanelContentView(
+                model: model,
+                chip: SidePanelChipState(),
+                boxFloor: SidePanelContentView.panelBoxFloor
+            )
+        )
+        hosting.frame = CGRect(
+            x: 0,
+            y: 0,
+            width: SidePanel.expandedWidth - SidePanelContentView.inset * 2,
+            height: 495
+        )
+        let window = NSWindow(
+            contentRect: hosting.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hosting
+        RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+        hosting.layoutSubtreeIfNeeded()
+
+        let scroll = try #require(Self.scrolls(in: hosting).first)
+        #expect(scroll.contentView is VerticalOnlyClipView, "the result can scroll sideways")
+        #expect(!scroll.hasHorizontalScroller)
+        #expect(scroll.hasVerticalScroller, "the long result lost its knob")
+        #expect(
+            (scroll.documentView?.frame.height ?? 0) > scroll.contentSize.height,
+            "the long result has nothing to scroll"
+        )
+        #expect(scroll.contentView.bounds.origin.y == 0, "the result opened below its first line")
+
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        hosting.layoutSubtreeIfNeeded()
+        #expect(abs(scroll.contentView.bounds.origin.y - 100) < 0.5, "a layout pass undid the scroll")
+        window.orderOut(nil)
+    }
+
+    /// The output scroll views under a view, in the order they are drawn.
+    private static func scrolls(in view: NSView) -> [InsetScrollView] {
+        if let scroll = view as? InsetScrollView { return [scroll] }
+        return view.subviews.flatMap { scrolls(in: $0) }
+    }
+
     /// The editor the shelf mounted, wherever SwiftUI put it in the host view.
     private static func textView(in view: NSView) -> NSTextView? {
         if let textView = view as? NSTextView { return textView }
@@ -1656,9 +1970,21 @@ struct PanelRenderTests {
     ///
     /// - Returns: the size of the picture in bytes.
     private static func draw(_ view: some View, size: CGSize, named name: String) throws -> Int {
+        try FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+        let rep = try bitmap(view, size: size)
+        guard let data = rep.representation(using: .png, properties: [:]) else {
+            Issue.record("no PNG for \(name)")
+            return 0
+        }
+        let url = Self.folder.appendingPathComponent("\(name).png")
+        try data.write(to: url)
+        return data.count
+    }
+
+    /// Draws a view into a bitmap, outside any visible window.
+    private static func bitmap(_ view: some View, size: CGSize) throws -> NSBitmapImageRep {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        try FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
 
         let hosting = NSHostingView(rootView: view)
         hosting.frame = CGRect(origin: .zero, size: size)
@@ -1680,18 +2006,11 @@ struct PanelRenderTests {
         hosting.layoutSubtreeIfNeeded()
 
         guard let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
-            Issue.record("no bitmap for \(name)")
-            return 0
+            throw CocoaError(.fileWriteUnknown)
         }
         hosting.cacheDisplay(in: hosting.bounds, to: rep)
-        guard let data = rep.representation(using: .png, properties: [:]) else {
-            Issue.record("no PNG for \(name)")
-            return 0
-        }
-        let url = Self.folder.appendingPathComponent("\(name).png")
-        try data.write(to: url)
         window.orderOut(nil)
-        return data.count
+        return rep
     }
 }
 
