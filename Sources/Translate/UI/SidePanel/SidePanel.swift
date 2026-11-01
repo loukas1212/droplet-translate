@@ -1,13 +1,12 @@
 import AppKit
-import Combine
 import DroppyKit
 import QuartzCore
 import SwiftUI
 
 /// The card's outline, published so the glass layer can be masked to it.
 ///
-/// The host's surface is a material: it would fill the whole window if it
-/// were not clipped, and the card's edge is the edge of the screen.
+/// The surface is a material: it would fill the whole window if it were not
+/// clipped, and the card's edge is the edge of the screen.
 final class SidePanelSurfaceState: ObservableObject {
     @Published var silhouette = Path()
     /// Mirrors the rim's fade to the left edge when the panel docks left.
@@ -16,7 +15,7 @@ final class SidePanelSurfaceState: ObservableObject {
 
 /// The handle's amount: how far its lobe hangs out of the card's edge.
 ///
-/// The lobe is part of the card's own path, so the host's surface covers the
+/// The lobe is part of the card's own path, so the card's surface covers the
 /// card and the lobe in one layer, and the colour never breaks between them.
 /// The mark on the lobe rides the same amount, so it stays on the lobe.
 final class SidePanelGripState: ObservableObject {
@@ -179,10 +178,16 @@ final class SidePanel: NSPanel {
         )
     }
 
+    /// The card body plus the two flare radii that melt its top and bottom
+    /// corners into the screen edge.
+    static func cardHeight(forBody body: CGFloat) -> CGFloat {
+        body + SidePanelCardShape.filletRadius * 2
+    }
+
     /// The window that holds a card body of `body`: the card plus the
     /// transparent strip the grip hangs in below it.
     static func windowHeight(forBody body: CGFloat) -> CGFloat {
-        body + SidePanelCardShape.filletRadius * 2 + SidePanelContentView.gripStrip
+        cardHeight(forBody: body) + SidePanelContentView.gripStrip
     }
 
     /// The window is as large as what it draws, so its transparent area never
@@ -201,6 +206,7 @@ final class SidePanel: NSPanel {
     private var isActive = false
     private var outsideMonitor: Any?
     private var keyObserver: NSObjectProtocol?
+    private var keyGainedObserver: NSObjectProtocol?
     /// The pressed canvas stays up until the user clicks another app.
     fileprivate var isExpanded = false
     /// The card body. The content reports what its text box needs; the window
@@ -223,6 +229,8 @@ final class SidePanel: NSPanel {
     private let grip = SidePanelGripState()
     /// The card's own pin; the menu reads it and the window answers it.
     private let pin = SidePanelPinState()
+    /// The glass's active face while a pinned card is not the key window.
+    private lazy var keyAppearance = PanelKeyAppearance(panel: self)
     private var content: NSHostingView<AnyView>?
     private var requestCapture: () -> Void = {}
     private var requestSelection: () -> Void = {}
@@ -230,11 +238,6 @@ final class SidePanel: NSPanel {
     private var activation: DroppyPanelActivation?
     /// Watches the pointer's button, so the chip knows a control is held.
     private var pressMonitor: Any?
-    /// The last active face, shown while a pinned card's app is in the
-    /// background. Liquid Glass itself cannot be frozen in-process.
-    private var glassSnapshot: NSImage?
-    private weak var glassSnapshotView: SidePanelSnapshotView?
-    private var snapshotRefresh: DispatchWorkItem?
 
     // MARK: - Opening and folding
 
@@ -454,6 +457,52 @@ final class SidePanel: NSPanel {
     /// refuses throws from AppKit, so the flag follows the expanded state.
     override var canBecomeMain: Bool { isExpanded }
 
+    /// A pinned card must keep its clicks while the host masks background
+    /// windows: a click-through card cannot be unpinned.
+    override var ignoresMouseEvents: Bool {
+        get { super.ignoresMouseEvents }
+        set {
+            super.ignoresMouseEvents = newValue
+            guard Self.keepsClicks(isPinned: pin.isPinned, isExpanded: isExpanded) else { return }
+            // The host's mask is a window-server flag; a set to false alone
+            // leaves the dead one. Push it through one change.
+            super.ignoresMouseEvents = true
+            super.ignoresMouseEvents = false
+        }
+    }
+
+    static func keepsClicks(isPinned: Bool, isExpanded: Bool) -> Bool {
+        isPinned && isExpanded
+    }
+
+    /// A pinned card's first press returns the foreground; the live glass is
+    /// already there, but the click has to reach Droppy's window.
+    override func sendEvent(_ event: NSEvent) {
+        if Self.isPress(event.type),
+           Self.takesFocusBack(
+               isPinned: pin.isPinned,
+               isExpanded: isExpanded,
+               appIsActive: NSApp.isActive
+           ) {
+            takeFocusBack()
+        }
+        super.sendEvent(event)
+    }
+
+    static func isPress(_ type: NSEvent.EventType) -> Bool {
+        type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown
+    }
+
+    /// A press in the background takes the foreground, so the control under the
+    /// pointer is the one the user sees and the keyboard follows the card.
+    static func takesFocusBack(
+        isPinned: Bool,
+        isExpanded: Bool,
+        appIsActive: Bool
+    ) -> Bool {
+        isPinned && isExpanded && !appIsActive
+    }
+
     /// The screen edge, vertical position clamped to the screen. The full frame
     /// is used so the tab sits at the physical edge, not inside the Dock inset.
     static func frame(
@@ -475,7 +524,6 @@ final class SidePanel: NSPanel {
     func setSide(_ side: SidePanelSide) {
         guard side != self.side else { return }
         self.side = side
-        clearGlassSnapshot()
         guard isActive else { return }
         place()
         layoutContent()
@@ -495,7 +543,6 @@ final class SidePanel: NSPanel {
         self.cancelSelection = cancelSelection
         self.side = model.sidePanelSide
         isActive = true
-        clearGlassSnapshot()
         // The shelf views bind to whatever model the droplet hands over, so a
         // fresh mount per activation keeps a relaunch from showing a stale one.
         content?.removeFromSuperview()
@@ -524,6 +571,16 @@ final class SidePanel: NSPanel {
         ignoresMouseEvents = false
     }
 
+    /// A pinned card is the one window the user still owns in the background.
+    private func keepClickableWhenPinned() {
+        guard pin.isPinned, isExpanded else { return }
+        makeClickable()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pin.isPinned, self.isExpanded else { return }
+            self.makeClickable()
+        }
+    }
+
     /// Folds the card so a window it opens, such as Settings, is not covered.
     func fold() {
         collapse(respectingPin: false)
@@ -531,7 +588,6 @@ final class SidePanel: NSPanel {
 
     func hide() {
         collapse(animated: false, respectingPin: false)
-        clearGlassSnapshot()
         displayLink?.invalidate()
         displayLink = nil
         hoverTarget = 0
@@ -560,19 +616,25 @@ final class SidePanel: NSPanel {
         installMonitor()
         installPressMonitor()
         if takingKey { takeKey() }
+        // A card revealed by a selection never takes the keyboard, so it must
+        // ask for the active glass face itself or macOS frosts it as inactive.
+        updateKeyAppearance()
         tabView.needsDisplay = true
     }
 
-    /// The pin keeps the card up when the user clicks elsewhere. The outside
-    /// click and resign-key observers are the only things that fold it, and
-    /// both ask `collapse` to respect the pin.
+    /// The pin belongs to this window, not the model: it keeps the card up
+    /// when the user clicks elsewhere.
     private func togglePin() {
         pin.isPinned.toggle()
-        if pin.isPinned {
-            refreshGlassSnapshotSoon()
-        } else {
-            clearGlassSnapshot()
-        }
+        if pin.isPinned { keepClickableWhenPinned() }
+        updateKeyAppearance()
+    }
+
+    /// The press is handled after the foreground returns, so the control under
+    /// the pointer is the one the user sees. `takeKey` keeps the return app current.
+    private func takeFocusBack() {
+        guard !NSApp.isActive else { return }
+        takeKey()
     }
 
     /// Points the bloom at 1 (open) or 0 (folded). A target that flips while
@@ -711,7 +773,6 @@ final class SidePanel: NSPanel {
             .translatedBy(x: -faceAnchor.x, y: -faceAnchor.y)
         content.layer?.setAffineTransform(transform)
         CATransaction.commit()
-        refreshGlassSnapshotSoon()
     }
 
     /// The pin is the one thing an outside click or a lost key window cannot
@@ -727,10 +788,10 @@ final class SidePanel: NSPanel {
         guard Self.foldsOnDismissal(isPinned: pin.isPinned, respectingPin: respectingPin) else {
             return
         }
-        clearGlassSnapshot()
         isExpanded = false
         // A closed card opens unpinned, like the floating panel's.
         pin.isPinned = false
+        updateKeyAppearance()
         settleTabForFold()
         model?.isToolbarExpanded = false
         chip.pressed = false
@@ -796,112 +857,36 @@ final class SidePanel: NSPanel {
         }
     }
 
-    // MARK: - Frozen glass
+    // MARK: - Background
 
     @objc private func appWillResignActive() {
-        // The glass has already faded by the time this lands, so show the face
-        // cached while the app was active; never capture here.
-        showGlassSnapshot()
+        keepClickableWhenPinned()
+        updateKeyAppearance()
     }
 
     @objc private func appDidResignActive() {
-        showGlassSnapshot()
+        keepClickableWhenPinned()
+        updateKeyAppearance()
     }
 
     @objc private func appDidBecomeActive() {
-        // Let the live glass draw its active frame before the frozen face goes.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, NSApp.isActive else { return }
-            self.hideGlassSnapshot()
-        }
-        refreshGlassSnapshotSoon()
+        updateKeyAppearance()
     }
 
-    /// The glass is composited by the window server: both `cacheDisplay` and a
-    /// window capture drop it. Keep a screen-region image of the active card.
-    private func captureGlassSnapshot() {
-        guard isActive, isExpanded, reveal >= 1, pin.isPinned, NSApp.isActive,
-              let makeImage = Self.screenImage else { return }
-        let rect = frame
-        let mainHeight = CGDisplayBounds(CGMainDisplayID()).height
-        let screenRect = CGRect(
-            x: rect.minX,
-            y: mainHeight - rect.maxY,
-            width: rect.width,
-            height: rect.height
+    /// The card keeps one face while it is open: unpinning must not hand it
+    /// back to the system's frosted inactive glass under the pointer.
+    private func updateKeyAppearance() {
+        keyAppearance.hold(
+            PanelKeyAppearance.shouldHold(
+                pinned: pin.isPinned,
+                shown: isExpanded
+            )
         )
-        guard let unmanaged = makeImage(
-            screenRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution]
-        ) else { return }
-        let image = unmanaged.takeRetainedValue()
-        guard image.width > 0, image.height > 0 else { return }
-        glassSnapshot = NSImage(cgImage: image, size: rect.size)
     }
-
-    private func showGlassSnapshot() {
-        guard isActive, isExpanded, pin.isPinned, let image = glassSnapshot else { return }
-        let view: SidePanelSnapshotView
-        if let glassSnapshotView {
-            view = glassSnapshotView
-        } else {
-            view = SidePanelSnapshotView()
-            view.autoresizingMask = [.width, .height]
-            glassSnapshotView = view
-        }
-        view.image = image
-        view.silhouette = tabView.silhouettePath()
-        view.frame = tabView.bounds
-        // The content is added after this view; keep the frozen face on top.
-        tabView.addSubview(view, positioned: .above, relativeTo: nil)
-        view.isHidden = false
-    }
-
-    private func hideGlassSnapshot() {
-        glassSnapshotView?.isHidden = true
-    }
-
-    private func clearGlassSnapshot() {
-        snapshotRefresh?.cancel()
-        snapshotRefresh = nil
-        hideGlassSnapshot()
-        glassSnapshot = nil
-    }
-
-    /// Give the active card time to settle, then cache the face the user sees.
-    private func refreshGlassSnapshotSoon() {
-        guard isActive, isExpanded, pin.isPinned, NSApp.isActive else { return }
-        snapshotRefresh?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            self?.snapshotRefresh = nil
-            self?.captureGlassSnapshot()
-        }
-        snapshotRefresh = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
-    }
-
-    private typealias WindowImageFunction = @convention(c) (
-        CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption
-    ) -> Unmanaged<CGImage>?
-
-    /// `CGWindowListCreateImage` is obsoleted in macOS 15 but still resolves;
-    /// it is the only in-process capture that includes Liquid Glass. If the
-    /// symbol disappears, the card keeps the live system glass.
-    private static let screenImage: WindowImageFunction? = {
-        guard let symbol = dlsym(
-            UnsafeMutableRawPointer(bitPattern: -2),
-            "CGWindowListCreateImage"
-        ) else { return nil }
-        return unsafeBitCast(symbol, to: WindowImageFunction.self)
-    }()
 
     /// A click in another app, or in another window of this one, folds the
     /// canvas back into the tab. The window observer catches the second case,
-    /// where no global event reaches the panel: Liquid Glass turns frosted
-    /// while its window is not key, so a card left behind would read as a
-    /// blur instead of the glass the user opened.
+    /// where no global event reaches the panel.
     private func installMonitor() {
         removeMonitor()
         outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
@@ -913,9 +898,16 @@ final class SidePanel: NSPanel {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.captureGlassSnapshot()
                 self?.collapse()
+                self?.updateKeyAppearance()
             }
+        }
+        keyGainedObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: self,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updateKeyAppearance() }
         }
     }
 
@@ -947,6 +939,10 @@ final class SidePanel: NSPanel {
         if let keyObserver {
             NotificationCenter.default.removeObserver(keyObserver)
             self.keyObserver = nil
+        }
+        if let keyGainedObserver {
+            NotificationCenter.default.removeObserver(keyGainedObserver)
+            self.keyGainedObserver = nil
         }
     }
 
@@ -1300,41 +1296,7 @@ final class SidePanel: NSPanel {
     }
 }
 
-/// A frozen face clipped to the card's outline. It never takes a click, so the
-/// live controls stay under it.
-@MainActor
-private final class SidePanelSnapshotView: NSView {
-    var image: NSImage? {
-        didSet { needsDisplay = true }
-    }
-    var silhouette: Path? {
-        didSet { needsDisplay = true }
-    }
-
-    override var isFlipped: Bool { true }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    override func draw(_ dirtyRect: NSRect) {
-        guard let image, let context = NSGraphicsContext.current?.cgContext else { return }
-        context.saveGState()
-        if let silhouette {
-            context.addPath(silhouette.cgPath)
-            context.clip()
-        }
-        image.draw(
-            in: bounds,
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: true,
-            hints: nil
-        )
-        context.restoreGState()
-    }
-}
-
-/// The host's themed surface, under the card's marks and over its black.
+/// The card's surface layer, under the card's marks and over its black.
 ///
 /// The layer is a material that covers the whole window, so it must never
 /// take a click: the grip and the card's own controls are above it, and the
@@ -1371,10 +1333,10 @@ final class SidePanelTabView: NSView {
     /// pointer enters and leaves the same rect and the hover cannot flicker.
     private var restingRect: NSRect { bounds }
 
-    /// The glass layer's shape. The host's surface is masked to it, so the
-    /// material never spills past the card's edge.
+    /// The glass layer's shape. The surface is masked to it, so the material
+    /// never spills past the card's edge.
     let surfaceState = SidePanelSurfaceState()
-    /// The host's themed surface, under the card's marks and over its black.
+    /// The card's surface layer, under the card's marks and over its black.
     private var glassHost: SidePanelGlassHost?
     /// The tab's own marks, above the glass: a black surface would swallow
     /// them otherwise.
@@ -1456,7 +1418,7 @@ final class SidePanelTabView: NSView {
     /// The card's outline with the handle's lobe under it, as one path.
     ///
     /// The card, the two fillets that run with the screen's edge and the lobe
-    /// under the card are one outline, so the host's surface covers all of it
+    /// under the card are one outline, so the card's surface covers all of it
     /// in a single layer and no seam can show between the pieces.
     func silhouettePath() -> Path {
         let path: Path
@@ -1521,8 +1483,8 @@ final class SidePanelTabView: NSView {
         )
     }
 
-    // The card has no fill of its own: the host's surface is the one layer
-    // over the whole outline, so the colour is the app's theme and not ours.
+    // The card has no fill of its own: the surface is the one layer over the
+    // whole outline, so the colour is the app's theme and not ours.
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // Expanded, the content lives here and must take its own clicks.
@@ -1597,8 +1559,8 @@ final class SidePanelTabView: NSView {
 /// The tab's own marks: the grip that moves the panel and the chevron that
 /// says where the click opens.
 ///
-/// They live above the glass, because the host's surface is opaque under a
-/// black theme and would swallow anything drawn under it.
+/// They live above the glass, because the surface is opaque under a black
+/// theme and would swallow anything drawn under it.
 @MainActor
 final class SidePanelTabInkView: NSView {
     weak var tab: SidePanelTabView?
@@ -1716,7 +1678,7 @@ struct SidePanelCardShape: Shape {
 /// The card's outline with the handle's lobe under it, as one path.
 ///
 /// The card, the two fillets that run with the screen's edge and the lobe
-/// under the card are one outline. The host's surface covers all of it in a
+/// under the card are one outline. The card's surface covers all of it in a
 /// single layer, so no seam can show between the pieces and the colour is the
 /// app's theme rather than ours.
 struct SidePanelUnifiedShape: Shape {

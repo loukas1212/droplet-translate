@@ -87,7 +87,12 @@ struct ResultDisplayPreview: View {
         case .panel:
             // The measured card: the result alone, or with the original above
             // it, both including the footer the siblings wear.
-            return CGSize(width: Self.panelWidth, height: model.resultContent.showsOriginal ? 273 : 246)
+            return CGSize(
+                width: Self.panelWidth,
+                height: model.resultContent.showsOriginal
+                    ? ResultWindowView.minimumHeightWithOriginal
+                    : ResultWindowView.minimumHeight
+            )
         case .sidePanel: return sidePanelSurfaceSize
         }
     }
@@ -169,7 +174,7 @@ struct SidePanelSurfacePreview: View {
     /// The card, at the size it opens at.
     static let cardSize = CGSize(
         width: SidePanel.expandedWidth,
-        height: bodyHeight + SidePanelCardShape.filletRadius * 2
+        height: SidePanel.cardHeight(forBody: bodyHeight)
     )
     private static var contentWidth: CGFloat {
         SidePanel.expandedWidth - SidePanelContentView.inset * 2

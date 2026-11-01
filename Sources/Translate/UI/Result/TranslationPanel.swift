@@ -11,12 +11,17 @@ final class TranslationPanel: NSPanel {
     static let shared = TranslationPanel()
 
     private var hosting: NSHostingView<AnyView>?
+    /// The card: the surface layer under the content, scaled as one piece
+    /// during the bloom.
+    private var cardView: NSView?
     private var monitor: Any?
     private var activation: DroppyPanelActivation?
     private var fallbackReturn: NSRunningApplication?
     private var keyTask: Task<Void, Never>?
     private var interactive = false
     private var pinned = false
+    /// The glass's active face while a pinned panel is not the key window.
+    private lazy var keyAppearance = PanelKeyAppearance(panel: self)
     private var requestCapture: () -> Void = {}
     private var requestSelection: () -> Void = {}
     private var cancelSelection: () -> Void = {}
@@ -51,6 +56,32 @@ final class TranslationPanel: NSPanel {
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(appDidResignActive),
+            name: NSApplication.didResignActiveNotification,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(windowDidChangeKey),
+            name: NSWindow.didResignKeyNotification,
+            object: self
+        )
+        center.addObserver(
+            self,
+            selector: #selector(windowDidChangeKey),
+            name: NSWindow.didBecomeKeyNotification,
+            object: self
+        )
     }
 
     override var canBecomeKey: Bool { true }
@@ -96,6 +127,7 @@ final class TranslationPanel: NSPanel {
                 pinned: pinned,
                 showsOriginal: showsOriginal,
                 colorScheme: model.surfaceColorScheme,
+                backdrop: .windowSurface,
                 onCopy: { onCopy(translated) },
                 onClose: { [weak self] in self?.closePanel() },
                 onPin: { [weak self] in self?.togglePin() },
@@ -104,7 +136,12 @@ final class TranslationPanel: NSPanel {
                 cancelSelection: cancelSelection
             )),
             width: width,
-            height: nil,
+            height: ResultWindowView.cardHeight(
+                forWidth: width,
+                translated: translated,
+                source: source,
+                showsOriginal: showsOriginal
+            ),
             near: rect,
             on: screen
         )
@@ -128,6 +165,7 @@ final class TranslationPanel: NSPanel {
                 actionTitle: actionTitle,
                 onAction: onAction,
                 colorScheme: colorScheme,
+                backdrop: .windowSurface,
                 onClose: { [weak self] in self?.closePanel() }
             )),
             width: 320,
@@ -169,11 +207,13 @@ final class TranslationPanel: NSPanel {
             ret.activate()
         }
         fallbackReturn = nil
+        keyAppearance.hold(false)
         orderOut(nil)
         // The content holds the model and the droplet's actions; a closed panel
         // must not keep them alive until the next result.
         contentView = nil
         hosting = nil
+        cardView = nil
     }
 
     /// The pin keeps the panel up when the user clicks elsewhere.
@@ -184,6 +224,30 @@ final class TranslationPanel: NSPanel {
         } else {
             installMonitor()
         }
+        updateKeyAppearance()
+    }
+
+    @objc private func appDidResignActive() {
+        updateKeyAppearance()
+    }
+
+    @objc private func appDidBecomeActive() {
+        updateKeyAppearance()
+    }
+
+    @objc private func windowDidChangeKey() {
+        updateKeyAppearance()
+    }
+
+    /// The panel keeps one face while it is open: unpinning must not hand it
+    /// back to the system's frosted inactive glass under the pointer.
+    private func updateKeyAppearance() {
+        keyAppearance.hold(
+            PanelKeyAppearance.shouldHold(
+                pinned: pinned,
+                shown: isVisible
+            )
+        )
     }
 
     // MARK: - Display
@@ -213,21 +277,40 @@ final class TranslationPanel: NSPanel {
             size: CGSize(width: width, height: height ?? 200)
         )
         self.hosting = hosting
+
+        // The card's surface sits in its own layer, as it does under the edge
+        // panel's content, so the bloom scales it with the boxes and the tiles
+        // sit on the themed glass instead of on the window's black.
+        let surface = NSHostingView(rootView: PanelSurfaceLayer())
+        surface.appearance = NSAppearance(named: .darkAqua)
+        surface.autoresizingMask = [.width, .height]
+        surface.frame = hosting.bounds
+        let glass = PanelSurfaceHost(frame: hosting.bounds)
+        glass.addSubview(surface)
+
+        let card = PanelCardView(frame: hosting.frame)
+        card.wantsLayer = true
+        card.addSubview(glass)
+        card.addSubview(hosting)
+        self.cardView = card
         // The window manages its content view's frame, so the card lives in a
-        // plain container: only the container follows the window, and the
-        // hosting view keeps its full size and is scaled inside it.
-        let container = NSView(frame: NSRect(origin: .zero, size: hosting.frame.size))
-        container.addSubview(hosting)
+        // plain container: only the container follows the window, and the card
+        // keeps its full size and is scaled inside it.
+        let container = NSView(frame: hosting.frame)
+        container.addSubview(card)
         contentView = container
 
         // One layout pass is enough to measure the SwiftUI content.
         hosting.layoutSubtreeIfNeeded()
-        let measured = hosting.fittingSize.height
         let panelHeight: CGFloat
         if let height {
             panelHeight = height
         } else {
-            panelHeight = min(600, max(minimumHeight, measured.isFinite ? measured : 200))
+            let measured = hosting.fittingSize.height
+            panelHeight = min(
+                ResultWindowView.maximumHeight,
+                max(minimumHeight, measured.isFinite ? measured : 200)
+            )
         }
 
         let target = screen
@@ -284,6 +367,7 @@ final class TranslationPanel: NSPanel {
         // until it sticks.
         startKeyRetry()
         if opening { startBloom(closing: false) }
+        updateKeyAppearance()
     }
 
     // MARK: - Bloom
@@ -329,10 +413,10 @@ final class TranslationPanel: NSPanel {
     /// edge while the card is small.
     private func place(bloom rect: NSRect) {
         setFrame(rect, display: true)
-        guard let hosting else { return }
+        guard let card = cardView else { return }
         let full = bloomCard.size
         let scale = full.height > 0 ? rect.height / full.height : 1
-        hosting.frame = NSRect(
+        card.frame = NSRect(
             x: (rect.width - full.width) / 2,
             y: (rect.height - full.height) / 2,
             width: full.width,
@@ -340,9 +424,9 @@ final class TranslationPanel: NSPanel {
         )
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        hosting.layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+        card.layer?.transform = CATransform3DMakeScale(scale, scale, 1)
         CATransaction.commit()
-        hosting.alphaValue = Self.bloomFade(bloomReveal)
+        card.alphaValue = Self.bloomFade(bloomReveal)
     }
 
     private func startBloom(closing: Bool) {
@@ -465,11 +549,6 @@ private let panelTileRadius: CGFloat = 29
 
 private let panelInset = DroppySpacing.lg
 
-/// The panel's surface is dark, so it takes the notch's ink tokens; the system's
-/// adaptive ink would vanish in light appearance.
-private let panelInk = AdaptiveColors.notchSurfacePrimaryText.opacity(0.92)
-private let panelSecondaryInk = AdaptiveColors.notchSurfaceSecondaryText
-
 /// What the panel's tiles sit on.
 ///
 /// The live panel sits on the host's own surface for the theme in Droppy
@@ -478,8 +557,71 @@ private let panelSecondaryInk = AdaptiveColors.notchSurfaceSecondaryText
 /// theme melts from black the way it does on the desktop, instead of melting
 /// into the settings page behind it.
 enum PanelBackdrop {
+    /// The surface is drawn in the view, as in the settings picture.
     case hostGlass
+    /// The surface is drawn over the droplet's black.
     case hostGlassOnBlack
+    /// The window draws the surface in its own layer behind the content, as
+    /// the edge panel does, so the card's themed glass stays one layer under
+    /// the boxes and the bloom scales it with the content.
+    case windowSurface
+
+    /// True when the view draws the card's surface itself.
+    var drawsCard: Bool {
+        self != .windowSurface
+    }
+}
+
+/// The card's face behind a panel's content.
+private struct PanelSurfaceBackdrop: View {
+    let backdrop: PanelBackdrop
+    let shape: AnyShape
+
+    var body: some View {
+        switch backdrop {
+        case .hostGlass:
+            SidePanelCardSurface(shape: shape)
+        case .hostGlassOnBlack:
+            shape
+                .fill(.black)
+                .overlay { SidePanelCardSurface(shape: shape) }
+        case .windowSurface:
+            Color.clear
+        }
+    }
+}
+
+/// The card's glass, drawn in its own AppKit layer under the panel's content.
+///
+/// `NSHostingView` keeps the surface out of the content's SwiftUI tree, the
+/// same way the edge panel's `SidePanelGlassHost` does, so the card is one
+/// layer under the boxes.
+private struct PanelSurfaceLayer: View {
+    var body: some View {
+        SidePanelCardSurface(
+            shape: AnyShape(
+                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+            )
+        )
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Holds the card's surface layer; the content above owns every click.
+private final class PanelSurfaceHost: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// The card as one piece: the surface layer and the content fill it together,
+/// so the bloom scales both on the same transform.
+private final class PanelCardView: NSView {
+    override func layout() {
+        super.layout()
+        for subview in subviews {
+            subview.frame = bounds
+        }
+    }
 }
 
 struct ResultWindowView: View {
@@ -503,11 +645,68 @@ struct ResultWindowView: View {
     var cancelSelection: () -> Void = {}
 
     /// The footer's height, the same as the shelf's and the edge panel's.
-    static let footerHeight = PanelFooterMetrics.disc + 6
-    /// The card's floor is the shelf's short card: the more menu opens upward
-    /// in one column, and a shorter card would cut the menu's top row on its
-    /// own rim.
-    static let minimumHeight: CGFloat = 246
+    static let footerHeight = PanelFooterMetrics.footerHeight
+    /// The card's floor is the shelf's opening card: the more menu opens
+    /// upward in one column, and a shorter card would cut the menu's top row
+    /// on its own rim.
+    static let minimumHeight: CGFloat = 250
+    /// The card with the original above the result. The measured card is
+    /// 273pt; 280 is the nearest round floor.
+    static let minimumHeightWithOriginal: CGFloat = 280
+    /// The tallest the card grows before its result scrolls.
+    static let maximumHeight: CGFloat = 600
+    /// The source is context, not the answer: four lines, then it scrolls.
+    static let sourceTextCap: CGFloat = 68
+    /// The text's room inside the card, once the root and tile insets are
+    /// taken out. The panel has a fixed width, so the height follows from it.
+    static var textWidth: CGFloat {
+        SidePanel.expandedWidth - panelInset * 2 - PanelTileText.sideInset * 2 - 20
+    }
+
+    /// The height the card needs for this pair, between its floor and its cap.
+    /// The result gets the room the source leaves; past the cap it scrolls.
+    static func cardHeight(
+        forWidth width: CGFloat,
+        translated: String,
+        source: String,
+        showsOriginal: Bool
+    ) -> CGFloat {
+        let showsSource = showsOriginal && !source.isEmpty
+        let textWidth = max(120, width - panelInset * 2 - PanelTileText.sideInset * 2 - 20)
+        let sourceHeight = showsSource
+            ? min(textHeight(source, width: textWidth), sourceTextCap)
+            : 0
+        // Root inset, both tiles' labels and padding, the copy row and the
+        // footer. The floors already leave a few lines of air in the result.
+        let chrome: CGFloat = showsSource ? 228 : 160
+        let resultCap = max(0, maximumHeight - chrome - sourceHeight)
+        let resultHeight = min(textHeight(translated, width: textWidth), resultCap)
+        let natural = chrome + sourceHeight + resultHeight
+        return min(maximumHeight, max(minimumHeight(showsOriginal: showsSource), natural))
+    }
+
+    static func minimumHeight(showsOriginal: Bool) -> CGFloat {
+        showsOriginal ? minimumHeightWithOriginal : minimumHeight
+    }
+
+    /// The text's wrapped height at the panel's type size, measured the way
+    /// the scroll view lays it out: character wrapping and a 5pt indent.
+    static func textHeight(_ text: String, width: CGFloat) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.firstLineHeadIndent = 5
+        paragraph.headIndent = 5
+        paragraph.lineBreakMode = .byCharWrapping
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [
+                .font: NSFont.systemFont(ofSize: SidePanelContentView.bodyFontSize),
+                .paragraphStyle: paragraph
+            ]
+        )
+        return ceil(bounds.height) + 2
+    }
 
     @State private var copied = false
     @State private var isPinned: Bool
@@ -554,19 +753,29 @@ struct ResultWindowView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            VStack(spacing: DroppySpacing.smd) {
+            // The footer follows the box with only its own 6pt rim above the
+            // disc, as on the shelf and the edge panel; the box takes the rest.
+            VStack(spacing: 0) {
                 if showsOriginal, !source.isEmpty {
-                    sourceTile
+                    sourceSection
+                        .padding(.bottom, DroppySpacing.smd)
                 }
-                resultTile
+                resultSection
                 footer
-                    .padding(.top, DroppySpacing.xs)
             }
             chipLayer
         }
         .coordinateSpace(name: SidePanelChipState.space)
         .environment(\.sidePanelChip, chip)
         .onPreferenceChange(SidePanelChipFrameKey.self) { chip.frames = $0 }
+        .onChange(of: model.isToolbarExpanded) { _, open in
+            // A menu that folds under the pointer never reports `ended`, and a
+            // stale true would hold it open on the next hover.
+            pointerInMenu = false
+            if open { return }
+            moreCloseTask?.cancel()
+            moreCloseTask = nil
+        }
         // One tracking area over the card: the chip follows the pointer from
         // control to control, as it does on the edge panel.
         .onContinuousHover { phase in
@@ -581,10 +790,23 @@ struct ResultWindowView: View {
         }
         .environment(\.colorScheme, colorScheme)
         .padding(panelInset)
-        .frame(minHeight: Self.minimumHeight)
-        .background { backdropView }
+        .frame(minHeight: Self.minimumHeight(
+            showsOriginal: showsOriginal && !source.isEmpty
+        ))
+        .background {
+            PanelSurfaceBackdrop(
+                backdrop: backdrop,
+                shape: AnyShape(
+                    RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+                )
+            )
+        }
         .clipShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
-        .shadow(radius: 12, y: 4)
+        .shadow(
+            color: backdrop.drawsCard ? .black.opacity(0.33) : .clear,
+            radius: 12,
+            y: 4
+        )
         .background(
             Button("") { onClose() }
                 .keyboardShortcut(.cancelAction)
@@ -599,23 +821,20 @@ struct ResultWindowView: View {
         }
     }
 
-    /// The surface the tiles sit on.
-    @ViewBuilder
-    private var backdropView: some View {
-        let shape = AnyShape(
-            RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+    /// The glass the shelf and the edge panel put their boxes on, bevel
+    /// included: without the top rim the pane disappears into the card.
+    private var tileGlass: some View {
+        FrostedTileSurface(
+            shape: AnyShape(
+                RoundedRectangle(cornerRadius: panelTileRadius, style: .continuous)
+            )
         )
-        switch backdrop {
-        case .hostGlass:
-            SidePanelCardSurface(shape: shape)
-        case .hostGlassOnBlack:
-            shape
-                .fill(.black)
-                .overlay { SidePanelCardSurface(shape: shape) }
-        }
     }
 
-    private var sourceTile: some View {
+    /// The original and its language, the label on the card above the box as
+    /// the edge panel puts its language row above the input. The words take
+    /// the box's top edge, not a label's row.
+    private var sourceSection: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.xs) {
             LanguageMenu(
                 model: model,
@@ -626,36 +845,45 @@ struct ResultWindowView: View {
                 chipTarget: .source,
                 showsChevron: true
             )
+            .padding(.leading, PanelTileText.sideInset)
             .chipTarget(.source)
-            Text(source)
-                .font(.system(size: SidePanelContentView.bodyFontSize))
-                .foregroundStyle(panelInk)
-                .cardTextShadow()
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            sourceTile
         }
-        .padding(DroppySpacing.md)
+    }
+
+    private var sourceTile: some View {
+        TranslationOutputScrollView(
+            text: source,
+            resetToken: "",
+            scrollerTopInset: PanelTileText.verticalAir,
+            scrollerBottomInset: PanelTileText.verticalAir,
+            textInset: PanelTileText.verticalAir,
+            fontSize: SidePanelContentView.bodyFontSize
+        )
+        // The words keep the same air; the pane they scroll behind now reaches
+        // the box's rim, so a cut line fades there instead of stopping above it.
+        .frame(height: Self.sourceHeight(for: source) + PanelTileText.verticalAir * 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, PanelTileText.sideInset)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background {
-            // The same glass the shelf and the edge panel put their boxes on,
-            // so the tiles take the theme's colour instead of a fixed wash.
-            Color.clear
-                .droppyGlassControlChrome(
-                    shape: AnyShape(
-                        RoundedRectangle(cornerRadius: panelTileRadius, style: .continuous)
-                    )
-                )
-        }
+        .panelTileEdgeFade()
+        .background { tileGlass }
+    }
+
+    /// The source keeps a short box; a capture longer than the cap scrolls
+    /// instead of pushing the answer off the card.
+    static func sourceHeight(for source: String) -> CGFloat {
+        min(textHeight(source, width: textWidth), sourceTextCap)
     }
 
     private var sourceMenuLabel: String {
         model.sourceID == TranslateModel.auto ? sourceName : model.name(for: model.sourceID)
     }
 
-    private var resultTile: some View {
+    /// The result and its language, with the same label above the box.
+    /// Changing the picker translates the source again.
+    private var resultSection: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            // The target language is a picker here, as in the language row
-            // on the shelf; changing it translates the source again.
             LanguageMenu(
                 model: model,
                 selection: $model.targetID,
@@ -666,47 +894,51 @@ struct ResultWindowView: View {
                 availableIDs: model.installedTargetIDs,
                 showsChevron: true
             )
+            .padding(.leading, PanelTileText.sideInset)
             .chipTarget(.target)
-            Text(translated)
-                .font(.system(size: SidePanelContentView.bodyFontSize))
-                .foregroundStyle(panelInk)
-                .cardTextShadow()
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            // The copy sits on the tile's bottom edge, as on the edge panel's
-            // result box, so a taller card does not leave it floating.
-            Spacer(minLength: 0)
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
-                Button {
-                    onCopy()
-                    copied = true
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(600))
-                        copied = false
-                    }
-                } label: {
-                    PanelCopyLabel(copied: copied)
-                        .chipHidesInk(chip.covers(.copy))
-                }
-                .buttonStyle(DroppyQuietButtonStyle(size: .small))
-                .chipTarget(.copy)
-                .keyboardShortcut("c", modifiers: .command)
-                .a11y(copied ? "a11y.copied" : "a11y.copy")
-            }
+            resultTile
         }
-        .padding(DroppySpacing.md)
+    }
+
+    private var resultTile: some View {
+        TranslationOutputScrollView(
+            text: translated,
+            resetToken: "",
+            scrollerTopInset: PanelTileText.verticalAir,
+            scrollerBottomInset: PanelTileText.verticalAir,
+            textInset: PanelTileText.verticalAir,
+            fontSize: SidePanelContentView.bodyFontSize
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background {
-            // The same glass the shelf and the edge panel put their boxes on,
-            // so the tiles take the theme's colour instead of a fixed wash.
-            Color.clear
-                .droppyGlassControlChrome(
-                    shape: AnyShape(
-                        RoundedRectangle(cornerRadius: panelTileRadius, style: .continuous)
-                    )
-                )
+        .padding(.horizontal, PanelTileText.sideInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .panelTileEdgeFade()
+        // The copy sits on the tile's bottom edge, as on the edge panel's
+        // result box, and outside the fade so its word stays sharp.
+        .overlay(alignment: .bottomTrailing) {
+            copyButton
+                .padding(.trailing, DroppySpacing.sm)
+                .padding(.bottom, DroppySpacing.sm)
         }
+        .background { tileGlass }
+    }
+
+    private var copyButton: some View {
+        Button {
+            onCopy()
+            copied = true
+            Task {
+                try? await Task.sleep(for: .milliseconds(600))
+                copied = false
+            }
+        } label: {
+            PanelCopyLabel(copied: copied)
+                .chipHidesInk(chip.covers(.copy))
+        }
+        .buttonStyle(DroppyQuietButtonStyle(size: .small))
+        .chipTarget(.copy)
+        .keyboardShortcut("c", modifiers: .command)
+        .a11y(copied ? "a11y.copied" : "a11y.copy")
     }
 
     /// The footer both siblings wear: the more disc on the leading edge and
@@ -728,19 +960,19 @@ struct ResultWindowView: View {
         }
         .frame(height: Self.footerHeight, alignment: .bottom)
         .overlay(alignment: .bottomLeading) {
-            if model.isToolbarExpanded {
-                PanelMoreMenu(
-                    model: model,
-                    requestCapture: requestCapture,
-                    requestSelection: requestSelection,
-                    cancelSelection: cancelSelection,
-                    onHover: { moreHover($0, inMenu: true) },
-                    pinned: isPinned,
-                    onPin: togglePin
-                )
-                .offset(y: -Self.footerHeight)
-                .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
-            }
+            // The menu stays mounted so its glass can fold back into the disc;
+            // `open` drives the slide and the hit area.
+            PanelMoreMenu(
+                model: model,
+                open: model.isToolbarExpanded,
+                requestCapture: requestCapture,
+                requestSelection: requestSelection,
+                cancelSelection: cancelSelection,
+                onHover: { moreHover($0, inMenu: true) },
+                pinned: isPinned,
+                onPin: togglePin
+            )
+            .offset(y: -Self.footerHeight)
         }
     }
 
@@ -884,6 +1116,7 @@ struct ResultWindowStatusView: View {
     var actionTitle: String? = nil
     var onAction: (() -> Void)? = nil
     var colorScheme: ColorScheme = .dark
+    var backdrop: PanelBackdrop = .hostGlass
     let onClose: () -> Void
 
     var body: some View {
@@ -913,14 +1146,19 @@ struct ResultWindowStatusView: View {
         .padding(16)
         .environment(\.colorScheme, colorScheme)
         .background {
-            SidePanelCardSurface(
+            PanelSurfaceBackdrop(
+                backdrop: backdrop,
                 shape: AnyShape(
                     RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
                 )
             )
         }
         .clipShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
-        .shadow(radius: 12, y: 4)
+        .shadow(
+            color: backdrop.drawsCard ? .black.opacity(0.33) : .clear,
+            radius: 12,
+            y: 4
+        )
         .background(
             Button("") { onClose() }
                 .keyboardShortcut(.cancelAction)
