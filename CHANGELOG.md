@@ -114,9 +114,11 @@ away again is not in it.
   and its glass starts as the disc's circle and slides up into the menu's
   rounded rectangle, so the background comes out of the button before the rows
   arrive.
-  The card keeps the shelf's short height as its floor and grows with the
-  result, up to 600pt; a longer result scrolls under an original capped at four
-  lines. It is the edge panel's card beside a capture:
+  The result alone keeps the shelf's short height as its floor; an original
+  opens the card at the siblings' second step, the short box over the full
+  result box, and the card grows with either up to 600pt, where a longer
+  result scrolls under an original capped at four lines. It is the edge
+  panel's card beside a capture:
   the same width, tile radius and type scale, so a result reads the same on
   both. Its input and result boxes carry the edge panel's frosted pane, text
   margin and soft rim fade, and name their language at the box's own top edge,

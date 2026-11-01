@@ -844,9 +844,12 @@ struct PanelRenderTests {
 
     @Test("The panels' standard card heights are round numbers")
     func panelCardHeightsAreRound() {
-        // The floating panel: the result alone, then the original above it.
+        // The floating panel: the result alone, then the original above it at
+        // the siblings' second step, the shelf's short box over its full one.
         #expect(ResultWindowView.minimumHeight == 250)
-        #expect(ResultWindowView.minimumHeightWithOriginal == 280)
+        #expect(ResultWindowView.sourceBoxHeight == SidePanelContentView.minBoxHeight)
+        #expect(ResultWindowView.resultBoxHeight == SidePanelContentView.resultBoxHeight)
+        #expect(ResultWindowView.minimumHeightWithOriginal == 420)
 
         // The edge panel: opens empty, grows with the input, then holds the
         // result with the input at its floor and at its cap.

@@ -650,9 +650,22 @@ struct ResultWindowView: View {
     /// upward in one column, and a shorter card would cut the menu's top row
     /// on its own rim.
     static let minimumHeight: CGFloat = 250
-    /// The card with the original above the result. The measured card is
-    /// 273pt; 280 is the nearest round floor.
-    static let minimumHeightWithOriginal: CGFloat = 280
+    /// The card with the original above the result: the siblings' second step,
+    /// the shelf's short box over its full one.
+    static var minimumHeightWithOriginal: CGFloat {
+        panelInset * 2 + sourceBoxHeight + boxGap + resultBoxHeight + footerHeight
+    }
+    /// The shelf's short input box, which the panel's original takes.
+    static let sourceBoxHeight: CGFloat = SidePanelContentView.minBoxHeight
+    /// The shelf's full result box, which the panel's answer takes.
+    static let resultBoxHeight: CGFloat = SidePanelContentView.resultBoxHeight
+    /// The air between the two boxes, as the shelf's steps space them.
+    static let boxGap: CGFloat = DroppySpacing.smd
+    /// What a box spends above and below its words: its language row, the air
+    /// under it and the fade bands at both rims.
+    static var boxChrome: CGFloat {
+        LanguageMenu.pillRowHeight + DroppySpacing.xs + PanelTileText.verticalAir * 2
+    }
     /// The tallest the card grows before its result scrolls.
     static let maximumHeight: CGFloat = 600
     /// The source is context, not the answer: four lines, then it scrolls.
@@ -664,7 +677,9 @@ struct ResultWindowView: View {
     }
 
     /// The height the card needs for this pair, between its floor and its cap.
-    /// The result gets the room the source leaves; past the cap it scrolls.
+    /// With an original the two boxes keep the siblings' step-2 heights instead
+    /// of shrinking to their words; the result takes the room the source
+    /// leaves, and past the cap it scrolls.
     static func cardHeight(
         forWidth width: CGFloat,
         translated: String,
@@ -673,16 +688,21 @@ struct ResultWindowView: View {
     ) -> CGFloat {
         let showsSource = showsOriginal && !source.isEmpty
         let textWidth = max(120, width - panelInset * 2 - PanelTileText.sideInset * 2 - 20)
-        let sourceHeight = showsSource
-            ? min(textHeight(source, width: textWidth), sourceTextCap)
-            : 0
-        // Root inset, both tiles' labels and padding, the copy row and the
-        // footer. The floors already leave a few lines of air in the result.
-        let chrome: CGFloat = showsSource ? 228 : 160
-        let resultCap = max(0, maximumHeight - chrome - sourceHeight)
-        let resultHeight = min(textHeight(translated, width: textWidth), resultCap)
-        let natural = chrome + sourceHeight + resultHeight
-        return min(maximumHeight, max(minimumHeight(showsOriginal: showsSource), natural))
+        let resultText = textHeight(translated, width: textWidth)
+        guard showsSource else {
+            // Root inset, the tile's language row and padding, the copy row
+            // and the footer. The floor already leaves a few lines of air.
+            let chrome: CGFloat = 160
+            let resultCap = max(0, maximumHeight - chrome)
+            let resultHeight = min(resultText, resultCap)
+            return min(maximumHeight, max(minimumHeight, chrome + resultHeight))
+        }
+        let sourceText = min(textHeight(source, width: textWidth), sourceTextCap)
+        let sourceTile = max(sourceBoxHeight, sourceText + boxChrome)
+        let room = maximumHeight - panelInset * 2 - sourceTile - boxGap - footerHeight
+        let resultTile = max(resultBoxHeight, min(resultText + boxChrome, room))
+        let natural = panelInset * 2 + sourceTile + boxGap + resultTile + footerHeight
+        return min(maximumHeight, max(minimumHeightWithOriginal, natural))
     }
 
     static func minimumHeight(showsOriginal: Bool) -> CGFloat {
@@ -848,6 +868,8 @@ struct ResultWindowView: View {
             .chipTarget(.source)
             sourceWords
         }
+        // The shelf's short box, so the original reads as the step-2 input.
+        .frame(minHeight: Self.sourceBoxHeight, alignment: .top)
         .background { tileGlass }
     }
 
