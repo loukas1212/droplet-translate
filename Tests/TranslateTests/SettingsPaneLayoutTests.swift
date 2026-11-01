@@ -104,29 +104,37 @@ struct SettingsPaneLayoutTests {
 
     @Test("The preview page draws its cards")
     func displayPageDraws() throws {
-        // The page is behind a door, so the harness never renders it.
-        let model = TranslateModel()
-        model.setResultDisplay(.panel)
-        let (view, window) = Self.host(
-            Form {
-                DropletSettingsPane {
-                    TranslateDisplaySettings(model: model).sections
+        // The page is behind a door, so the harness never renders it. Both
+        // panels are drawn: the result alone, and the two-box card the shelf's
+        // second step wears.
+        for (content, name) in [
+            (ResultContent.result, "translate-settings-display.png"),
+            (ResultContent.both, "translate-settings-display-both.png")
+        ] {
+            let model = TranslateModel()
+            model.setResultDisplay(.panel)
+            model.resultContent = content
+            let (view, window) = Self.host(
+                Form {
+                    DropletSettingsPane {
+                        TranslateDisplaySettings(model: model).sections
+                    }
                 }
+                .formStyle(.grouped)
+                .frame(width: 590, height: 1500)
+            )
+
+            #expect(Self.ink(in: view) > 0, "the preview page draws nothing at all")
+
+            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+            #expect(rep != nil, "the page drew no bitmap")
+            if let rep, let data = (view.cacheDisplay(in: view.bounds, to: rep),
+                                    rep.representation(using: .png, properties: [:])).1 {
+                let url = URL(fileURLWithPath: NSTemporaryDirectory())
+                    .appendingPathComponent(name)
+                try data.write(to: url)
             }
-            .formStyle(.grouped)
-            .frame(width: 590, height: 1500)
-        )
-        defer { window.orderOut(nil) }
-
-        #expect(Self.ink(in: view) > 0, "the preview page draws nothing at all")
-
-        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-        #expect(rep != nil, "the page drew no bitmap")
-        if let rep, let data = (view.cacheDisplay(in: view.bounds, to: rep),
-                                rep.representation(using: .png, properties: [:])).1 {
-            let url = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("translate-settings-display.png")
-            try data.write(to: url)
+            window.orderOut(nil)
         }
     }
 
@@ -242,7 +250,24 @@ struct SettingsPaneLayoutTests {
     @Test("Every picture fills the stage in the direction its own shape allows")
     func displayPreviewFitsTheStage() {
         let stage = ResultDisplayPreview.stageSize
-        #expect(stage == CGSize(width: 440, height: 280))
+        #expect(stage.width == 440)
+        #expect(stage.height == ResultWindowView.minimumHeightWithOriginal)
+
+        // The two-box panel is the tallest picture. It still fills the stage's
+        // width, so it reads the same size as the shelf beside it instead of
+        // shrinking to a thumbnail.
+        let twoBoxes = ResultDisplayPreview.previewScale(
+            surfaceSize: CGSize(
+                width: 460,
+                height: ResultWindowView.minimumHeightWithOriginal
+            ),
+            stageSize: stage
+        )
+        #expect(abs(460 * twoBoxes - stage.width) < 0.001)
+        #expect(
+            ResultWindowView.minimumHeightWithOriginal * twoBoxes
+                <= stage.height + 0.001
+        )
 
         // A wide panel and a tall card both fill the stage's width, so neither
         // reads as bigger than the other on the page.

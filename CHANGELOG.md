@@ -51,7 +51,9 @@ away again is not in it.
 - The Preview page shows the chosen place with one example translation drawn
   by the droplet itself — the shelf widget in its host's shell, the side
   panel's own card, the panel on its own surface — and the name of the place
-  under it, so the picture is never mistaken for another one.
+  under it, so the picture is never mistaken for another one. Every picture
+  is drawn at the shelf's width, so the panel's two-box card reads the same
+  size as the others instead of shrinking to fit a shorter stage.
 - The pictures are drawn the way the app draws the surface they show: over
   the black under them, so the picture follows the theme Droppy is set to — a
   glass theme melts from black the way it does on the notch — and never wears

@@ -45,10 +45,14 @@ struct ResultDisplayPreview: View {
     private static let shelfWidth: CGFloat = 440
     private static let panelWidth: CGFloat = 460
 
-    /// The box every picture is drawn into. A destination fills it as far as
-    /// its own shape allows, so a wide panel and a tall card read the same
-    /// size on the page and the row does not jump when the choice changes.
-    static let stageSize = CGSize(width: 440, height: 280)
+    /// The box every picture is drawn into. Its width is the shelf's, so a
+    /// picture never reads wider than its siblings; its height is the tallest
+    /// card a picture shows (the floating panel with an original), so that
+    /// one still fills the width instead of shrinking to fit a short stage.
+    static let stageSize = CGSize(
+        width: 440,
+        height: ResultWindowView.minimumHeightWithOriginal
+    )
 
     var body: some View {
         drawing
