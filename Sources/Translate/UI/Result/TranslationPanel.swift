@@ -651,20 +651,27 @@ struct ResultWindowView: View {
     /// on its own rim.
     static let minimumHeight: CGFloat = 250
     /// The card with the original above the result: the siblings' second step,
-    /// the shelf's short box over its full one.
+    /// the shelf's short box over its full one, under the language row.
     static var minimumHeightWithOriginal: CGFloat {
-        panelInset * 2 + sourceBoxHeight + boxGap + resultBoxHeight + footerHeight
+        panelInset * 2 + languageRowHeight + sourceBoxHeight + boxGap
+            + resultBoxHeight + footerHeight
     }
     /// The shelf's short input box, which the panel's original takes.
     static let sourceBoxHeight: CGFloat = SidePanelContentView.minBoxHeight
     /// The shelf's full result box, which the panel's answer takes.
     static let resultBoxHeight: CGFloat = SidePanelContentView.resultBoxHeight
     /// The air between the two boxes, as the shelf's steps space them.
-    static let boxGap: CGFloat = DroppySpacing.smd
-    /// What a box spends above and below its words: its language row, the air
-    /// under it and the fade bands at both rims.
-    static var boxChrome: CGFloat {
-        LanguageMenu.pillRowHeight + DroppySpacing.xs + PanelTileText.verticalAir * 2
+    static let boxGap: CGFloat = DroppySpacing.xsm
+    /// The seam the language row cuts for the swap disc: the air under the
+    /// labels' pill, the fillet that runs from the cut, and the air each label
+    /// keeps from its half's edge.
+    static let rowGap: CGFloat = DroppySpacing.xsm
+    static let seamFillet: CGFloat = 10
+    static let rowEdgeInset: CGFloat = 10
+    /// What the row adds above the original's box: the pill, with the box
+    /// tucked under the disc's lower half.
+    static var languageRowHeight: CGFloat {
+        LanguageMenu.pillRowHeight + rowGap
     }
     /// The tallest the card grows before its result scrolls.
     static let maximumHeight: CGFloat = 600
@@ -698,10 +705,15 @@ struct ResultWindowView: View {
             return min(maximumHeight, max(minimumHeight, chrome + resultHeight))
         }
         let sourceText = min(textHeight(source, width: textWidth), sourceTextCap)
-        let sourceTile = max(sourceBoxHeight, sourceText + boxChrome)
-        let room = maximumHeight - panelInset * 2 - sourceTile - boxGap - footerHeight
-        let resultTile = max(resultBoxHeight, min(resultText + boxChrome, room))
-        let natural = panelInset * 2 + sourceTile + boxGap + resultTile + footerHeight
+        let sourceTile = max(sourceBoxHeight, sourceText + PanelTileText.verticalAir * 2)
+        let room = maximumHeight - panelInset * 2 - languageRowHeight - sourceTile
+            - boxGap - footerHeight
+        let resultTile = max(
+            resultBoxHeight,
+            min(resultText + PanelTileText.verticalAir * 2, room)
+        )
+        let natural = panelInset * 2 + languageRowHeight + sourceTile + boxGap
+            + resultTile + footerHeight
         return min(maximumHeight, max(minimumHeightWithOriginal, natural))
     }
 
@@ -776,9 +788,11 @@ struct ResultWindowView: View {
             // The footer follows the box with only its own 6pt rim above the
             // disc, as on the shelf and the edge panel; the box takes the rest.
             VStack(spacing: 0) {
-                if showsOriginal, !source.isEmpty {
+                if showsLanguageRow {
+                    languageRow
                     sourceTile
-                        .padding(.bottom, DroppySpacing.smd)
+                        .padding(.top, -(SidePanelContentView.discRadius - Self.rowGap))
+                        .padding(.bottom, Self.boxGap)
                 }
                 resultTile
                 footer
@@ -841,36 +855,170 @@ struct ResultWindowView: View {
         }
     }
 
-    /// The glass the shelf and the edge panel put their boxes on, bevel
-    /// included: without the top rim the pane disappears into the card.
+    /// The glass every box sits on, bevel included: without the top rim the
+    /// pane disappears into the card.
     private var tileGlass: some View {
-        FrostedTileSurface(
-            shape: AnyShape(
-                RoundedRectangle(cornerRadius: panelTileRadius, style: .continuous)
-            )
+        FrostedTileSurface(shape: AnyShape(tileShape))
+    }
+
+    private var tileShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: panelTileRadius, style: .continuous)
+    }
+
+    /// The card with an original shows the shelf's language row: the two
+    /// labels in one capsule, the swap disc in the seam it cuts, and the
+    /// original's box tucked under it.
+    private var showsLanguageRow: Bool {
+        showsOriginal && !source.isEmpty
+    }
+
+    /// The shelf's language row, at the panel's own width.
+    private var languageRow: some View {
+        let rowWidth = SidePanel.expandedWidth - panelInset * 2
+        let halfWidth = (rowWidth - SidePanelContentView.discRadius * 2) / 2
+        let button = SidePanelContentView.buttonDiameter
+        let capsule = AnyShape(Capsule(style: .continuous))
+        return ZStack(alignment: .topLeading) {
+            Color.clear
+                .frame(width: rowWidth, height: LanguageMenu.pillRowHeight)
+                .droppyGlassControlChrome(shape: capsule)
+                .mask {
+                    GlassPocketMask(
+                        shape: capsule,
+                        centreY: LanguageMenu.pillRowHeight,
+                        radius: SidePanelContentView.discRadius,
+                        bottomFillet: Self.seamFillet
+                    )
+                }
+            swapButton
+                .offset(x: (rowWidth - button) / 2, y: LanguageMenu.pillRowHeight - button / 2)
+            swapGlyph
+                .offset(x: (rowWidth - button) / 2, y: LanguageMenu.pillRowHeight - button / 2)
+            HStack(spacing: 0) {
+                LanguageMenu(
+                    model: model,
+                    selection: $model.sourceID,
+                    includesAuto: true,
+                    label: sourceMenuLabel,
+                    inPillRow: true,
+                    highlighted: chip.target == .source,
+                    fontSize: SidePanelContentView.bodyFontSize,
+                    alignment: .center,
+                    edgeInset: Self.rowEdgeInset,
+                    chipTarget: .source,
+                    availableIDs: model.installedSourceIDs
+                )
+                .chipTarget(
+                    .source,
+                    insets: EdgeInsets(
+                        top: PanelFooterMetrics.chipInset,
+                        leading: 0,
+                        bottom: PanelFooterMetrics.chipInset,
+                        trailing: 0
+                    )
+                )
+                .padding(.leading, PanelFooterMetrics.chipInset)
+                .frame(width: halfWidth)
+                // The pocket's width: both labels end on the disc's edge.
+                Color.clear
+                    .frame(width: SidePanelContentView.discRadius * 2)
+                LanguageMenu(
+                    model: model,
+                    selection: $model.targetID,
+                    includesAuto: false,
+                    label: model.name(for: model.targetID),
+                    inPillRow: true,
+                    highlighted: chip.target == .target,
+                    fontSize: SidePanelContentView.bodyFontSize,
+                    alignment: .center,
+                    edgeInset: Self.rowEdgeInset,
+                    chipTarget: .target,
+                    availableIDs: model.installedTargetIDs
+                )
+                .chipTarget(
+                    .target,
+                    insets: EdgeInsets(
+                        top: PanelFooterMetrics.chipInset,
+                        leading: 0,
+                        bottom: PanelFooterMetrics.chipInset,
+                        trailing: 0
+                    )
+                )
+                .padding(.trailing, PanelFooterMetrics.chipInset)
+                .frame(width: halfWidth)
+            }
+            .frame(width: rowWidth, height: LanguageMenu.pillRowHeight)
+        }
+        .frame(
+            width: rowWidth,
+            height: LanguageMenu.pillRowHeight + SidePanelContentView.discRadius,
+            alignment: .topLeading
         )
     }
 
-    /// The original, its language and its words in one box: the picker keeps
-    /// the box's top edge, so it travels with the words it belongs to.
-    private var sourceTile: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            LanguageMenu(
-                model: model,
-                selection: $model.sourceID,
-                includesAuto: true,
-                label: sourceMenuLabel,
-                fontSize: SidePanelContentView.labelFontSize,
-                chipTarget: .source,
-                showsChevron: true
-            )
-            .padding(.leading, PanelTileText.sideInset)
-            .chipTarget(.source)
-            sourceWords
+    private var swapButton: some View {
+        Button {
+            model.swapLanguages()
+        } label: {
+            Color.clear
+                .frame(
+                    width: SidePanelContentView.buttonDiameter,
+                    height: SidePanelContentView.buttonDiameter
+                )
+                .contentShape(Circle())
         }
-        // The shelf's short box, so the original reads as the step-2 input.
-        .frame(minHeight: Self.sourceBoxHeight, alignment: .top)
-        .background { tileGlass }
+        .buttonStyle(
+            PanelPressStyle(
+                hoverScale: SidePanelChipState.hoverScale,
+                pressScale: SidePanelChipState.pressScale
+            )
+        )
+        .background {
+            Color.clear.droppyGlassControlChrome(shape: AnyShape(Circle()))
+        }
+        .chipTarget(.swap)
+        .arrowCursorRegion()
+        .a11y("a11y.swap")
+        .disabled(!model.canSwap)
+    }
+
+    private var swapGlyph: some View {
+        Image(systemName: "repeat")
+            .font(.system(size: SidePanelContentView.buttonDiameter * 0.4, weight: .bold))
+            .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
+            // Sideways arrows: the languages sit side by side. Each swap turns
+            // the pair half a circle, so the arrows point the other way.
+            .rotationEffect(.degrees(Double(model.swapSpins) * 180))
+            .animation(DroppyAnimation.state, value: model.swapSpins)
+            .frame(
+                width: SidePanelContentView.buttonDiameter,
+                height: SidePanelContentView.buttonDiameter
+            )
+            .opacity(model.canSwap ? 1 : 0.65)
+            .chipHidesInk(chip.covers(.swap))
+            .allowsHitTesting(false)
+    }
+
+    /// The original's box: the shelf's short input, with the swap disc's pocket
+    /// cut into its top edge when the row is above it.
+    private var sourceTile: some View {
+        sourceWords
+            .frame(minHeight: Self.sourceBoxHeight, alignment: .top)
+            .background {
+                if showsLanguageRow {
+                    FrostedTileSurface(shape: AnyShape(tileShape))
+                        .mask {
+                            GlassPocketMask(
+                                shape: AnyShape(tileShape),
+                                centreY: -Self.rowGap,
+                                radius: SidePanelContentView.discRadius,
+                                topFillet: Self.seamFillet
+                            )
+                        }
+                } else {
+                    tileGlass
+                }
+            }
     }
 
     private var sourceWords: some View {
@@ -901,22 +1049,24 @@ struct ResultWindowView: View {
         model.sourceID == TranslateModel.auto ? sourceName : model.name(for: model.sourceID)
     }
 
-    /// The result, its language and its words in the same box. Changing the
-    /// picker translates the source again.
+    /// The result's box. Alone, it carries the target picker at its top edge;
+    /// beside an original, the picker sits in the language row above instead.
     private var resultTile: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            LanguageMenu(
-                model: model,
-                selection: $model.targetID,
-                includesAuto: false,
-                label: model.name(for: model.targetID),
-                fontSize: SidePanelContentView.labelFontSize,
-                chipTarget: .target,
-                availableIDs: model.installedTargetIDs,
-                showsChevron: true
-            )
-            .padding(.leading, PanelTileText.sideInset)
-            .chipTarget(.target)
+            if !showsLanguageRow {
+                LanguageMenu(
+                    model: model,
+                    selection: $model.targetID,
+                    includesAuto: false,
+                    label: model.name(for: model.targetID),
+                    fontSize: SidePanelContentView.labelFontSize,
+                    chipTarget: .target,
+                    availableIDs: model.installedTargetIDs,
+                    showsChevron: true
+                )
+                .padding(.leading, PanelTileText.sideInset)
+                .chipTarget(.target)
+            }
             resultWords
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

@@ -849,7 +849,7 @@ struct PanelRenderTests {
         #expect(ResultWindowView.minimumHeight == 250)
         #expect(ResultWindowView.sourceBoxHeight == SidePanelContentView.minBoxHeight)
         #expect(ResultWindowView.resultBoxHeight == SidePanelContentView.resultBoxHeight)
-        #expect(ResultWindowView.minimumHeightWithOriginal == 420)
+        #expect(ResultWindowView.minimumHeightWithOriginal == 456)
 
         // The edge panel: opens empty, grows with the input, then holds the
         // result with the input at its floor and at its cap.

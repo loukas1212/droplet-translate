@@ -115,19 +115,23 @@ away again is not in it.
   rounded rectangle, so the background comes out of the button before the rows
   arrive.
   The result alone keeps the shelf's short height as its floor; an original
-  opens the card at the siblings' second step, the short box over the full
-  result box, and the card grows with either up to 600pt, where a longer
-  result scrolls under an original capped at four lines. It is the edge
-  panel's card beside a capture:
+  opens the card at the siblings' second step, the language row over the
+  shelf's short input box and its full result box, and the card grows with
+  either up to 600pt, where a longer result scrolls under an original capped
+  at four lines. It is the edge panel's card beside a capture:
   the same width, tile radius and type scale, so a result reads the same on
-  both. Its input and result boxes carry the edge panel's frosted pane, text
-  margin and soft rim fade, and name their language at the box's own top edge,
-  so each picker travels with the words it belongs to and the words start at
-  the box's edge instead of floating on black.
-- The target language sits in the result's header as a menu with a chevron;
-  choosing another language translates the source again. Pin stays in the more
-  menu, so the header keeps only the picker and the close disc; the panel keeps
-  the clear glass while it is open, like the edge card.
+  both. Its boxes carry the edge panel's frosted pane, text margin and soft
+  rim fade.
+- With an original, the two languages sit in one glass row at the card's top,
+  as on the shelf: the pair ends on the edge of the swap disc that the row
+  cuts its pocket for, so the disc's lower half sits in the input box's top
+  edge. The row and its box travel together, and swapping turns the disc half
+  a circle as the languages change places.
+- The target language sits in the result's header as a menu with a chevron
+  when the card shows the result alone; choosing another language translates
+  the source again. Pin stays in the more menu, so the header keeps only the
+  picker and the close disc; the panel keeps the clear glass while it is open,
+  like the edge card.
 - The floating panel blooms out of the point the result came from: the card and
   everything on it grow on a radius from a dot at the captured region, run a
   little past their size and settle, and the words come in as the card is
