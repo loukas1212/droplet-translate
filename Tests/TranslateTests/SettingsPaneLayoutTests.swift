@@ -177,14 +177,14 @@ struct SettingsPaneLayoutTests {
             usesIslandCurvature: true,
             notchHeight: DroppyShellMetrics.physicalNotchHeight
         )
-        #expect(island == CGSize(width: 475, height: 265))
+        #expect(island == CGSize(width: 475, height: 269))
 
         let notch = ShelfWidgetSurfacePreview.previewSize(
             widgetSize: widget,
             usesIslandCurvature: false,
             notchHeight: DroppyShellMetrics.physicalNotchHeight
         )
-        #expect(notch == CGSize(width: 539, height: 296))
+        #expect(notch == CGSize(width: 539, height: 300))
     }
 
     @Test("Display previews follow host changes between notch and island")
@@ -247,7 +247,7 @@ struct SettingsPaneLayoutTests {
         // A wide panel and a tall card both fill the stage's width, so neither
         // reads as bigger than the other on the page.
         let panel = ResultDisplayPreview.previewScale(
-            surfaceSize: CGSize(width: 460, height: 246),
+            surfaceSize: CGSize(width: 460, height: 250),
             stageSize: stage
         )
         let card = ResultDisplayPreview.previewScale(
@@ -256,7 +256,7 @@ struct SettingsPaneLayoutTests {
         )
         #expect(abs(460 * panel - stage.width) < 0.001)
         #expect(abs(475 * card - stage.width) < 0.001)
-        #expect(246 * panel <= stage.height + 0.001)
+        #expect(250 * panel <= stage.height + 0.001)
         #expect(265 * card <= stage.height + 0.001)
         #expect(
             ResultDisplayPreview.previewScale(surfaceSize: .zero, stageSize: stage) == 1
