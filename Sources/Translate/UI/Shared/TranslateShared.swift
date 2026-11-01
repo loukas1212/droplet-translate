@@ -198,6 +198,10 @@ enum PanelFooterMetrics {
     /// The rim the dots keep inside the disc, and the rim a language label
     /// keeps around its mark.
     static var chipInset: CGFloat { (disc - control) / 2 }
+    /// The air above the disc, between it and the boxes or the open menu.
+    static let rim: CGFloat = 6
+    /// The footer's height, shared so the menu's glass can start on the disc.
+    static var footerHeight: CGFloat { disc + rim }
 }
 
 /// The more disc's glyph. The edge panel's chip draws it again above its own
@@ -474,12 +478,57 @@ struct ToolbarCapsule: View {
     }
 }
 
+/// The menu's glass as one piece: a rounded rectangle whose frame and corner
+/// radius run from the more disc's circle, covering it, to the menu's own
+/// rectangle. The whole shape lifts as it grows, so the menu slides out of the
+/// button instead of budding in place.
+struct PanelMenuMorphShape: Shape {
+    var progress: CGFloat
+    /// The travel from the disc's bottom to the menu's: the footer's height.
+    var lift: CGFloat
+    var cornerRadius: CGFloat = 20
+    var seed: CGFloat = PanelFooterMetrics.disc
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let p = min(max(progress, 0), 1)
+        let seed = min(self.seed, rect.width, rect.height)
+        let start = CGRect(
+            x: rect.minX,
+            y: rect.maxY - seed,
+            width: seed,
+            height: seed
+        )
+        let end = CGRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: rect.width,
+            height: max(rect.height - lift, seed)
+        )
+        let frame = CGRect(
+            x: start.minX + (end.minX - start.minX) * p,
+            y: start.minY + (end.minY - start.minY) * p,
+            width: start.width + (end.width - start.width) * p,
+            height: start.height + (end.height - start.height) * p
+        )
+        let radius = seed / 2 + (cornerRadius - seed / 2) * p
+        return Path(roundedRect: frame, cornerRadius: radius, style: .continuous)
+    }
+}
+
 /// The panel's more menu: one glass panel, one labeled row per tool. The panel's
 /// chip marks the row under the pointer, so the menu draws no glass of its own.
 /// The card draws it above the footer, so it never moves the controls and the
 /// more disc stays in sight under it.
 struct PanelMoreMenu: View {
     @ObservedObject var model: TranslateModel
+    /// The footer keeps the menu mounted while it folds, so the glass can slide
+    /// back into the disc instead of disappearing in one frame.
+    var open: Bool
     var requestCapture: () -> Void = {}
     var requestSelection: () -> Void = {}
     var cancelSelection: () -> Void = {}
@@ -490,6 +539,9 @@ struct PanelMoreMenu: View {
     /// and pins the shelf through the model.
     var pinned: Bool? = nil
     var onPin: (() -> Void)? = nil
+
+    @State private var progress: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The rows, in the order the menu stacks them: settings at the bottom,
     /// over the disc, and capture at the top.
@@ -510,15 +562,17 @@ struct PanelMoreMenu: View {
         tools
             .padding(Self.edgeInset)
             .frame(width: width)
+            // The words wait for the circle to open, so the first thing the
+            // pointer sees is the glass coming out of the disc.
+            .opacity(rowOpacity)
             .background {
-                Color.clear
-                    .droppyGlassControlChrome(
-                        shape: AnyShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    )
+                PanelMenuGlass(progress: glassProgress)
+                    .allowsHitTesting(false)
             }
             // The panel's own tracking area marks the rows; this only tells the
             // footer whether the pointer is still inside the open menu.
             .onContinuousHover { phase in
+                guard open else { return }
                 switch phase {
                 case .active:
                     onHover?(true)
@@ -526,6 +580,24 @@ struct PanelMoreMenu: View {
                     onHover?(false)
                 }
             }
+            // The menu stays mounted so it has somewhere to fold back into;
+            // the footer only flips `open`.
+            .onAppear {
+                if open {
+                    withAnimation(DroppyAnimation.state) { progress = 1 }
+                }
+            }
+            .onChange(of: open) { _, now in
+                withAnimation(DroppyAnimation.state) {
+                    progress = now ? 1 : 0
+                }
+            }
+            .allowsHitTesting(open)
+            .accessibilityHidden(!open)
+            // Reduce Motion keeps the fade but drops the slide: the glass is
+            // already the menu's shape, so only the menu's opacity moves.
+            .opacity(reduceMotion ? (open ? 1 : 0) : 1)
+            .animation(reduceMotion ? DroppyAnimation.state : nil, value: open)
     }
 
     private var tools: some View {
@@ -545,7 +617,7 @@ struct PanelMoreMenu: View {
             a11yKey: "a11y.capture",
             busy: model.captureState == .recognizing,
             disabled: model.captureState != .idle || !model.canCapture,
-            target: .menuCapture,
+            target: open ? .menuCapture : nil,
             action: requestCapture
         )
     }
@@ -558,7 +630,7 @@ struct PanelMoreMenu: View {
             a11yKey: model.selectState == .armed ? "a11y.cancelSelect" : "a11y.select",
             busy: model.selectState == .pulling,
             disabled: model.selectState == .pulling || (model.selectState != .armed && !model.canSelect),
-            target: .menuSelect,
+            target: open ? .menuSelect : nil,
             action: {
                 if model.selectState == .armed {
                     cancelSelection()
@@ -578,7 +650,7 @@ struct PanelMoreMenu: View {
             busy: false,
             disabled: onPin == nil ? !model.canPin : false,
             rotation: showsPinned ? 0 : 45,
-            target: .menuPin,
+            target: open ? .menuPin : nil,
             action: onPin ?? model.togglePin
         )
     }
@@ -593,11 +665,51 @@ struct PanelMoreMenu: View {
             a11yKey: "a11y.settings",
             busy: false,
             disabled: false,
-            target: .menuSettings,
+            target: open ? .menuSettings : nil,
             action: model.openSettings
         )
     }
 
+    private var glassProgress: CGFloat {
+        reduceMotion ? 1 : progress
+    }
+
+    private var rowOpacity: Double {
+        if reduceMotion { return 1 }
+        let p = min(max(progress, 0), 1)
+        let start: CGFloat = 0.35
+        return Double(min(max((p - start) / (1 - start), 0), 1))
+    }
+}
+
+/// The menu's glass, drawn one footer taller than the menu so its seed lands
+/// on the disc below. At rest the extra strip is outside the shape and stays
+/// clear; on the way open and closed it carries the glass out of the button.
+private struct PanelMenuGlass: View, @MainActor Animatable {
+    var progress: CGFloat
+
+    /// `AnyShape` carries no animatable data, so the chrome's morph is rebuilt
+    /// from an interpolated progress on every frame instead of snapping.
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    private var lift: CGFloat { PanelFooterMetrics.footerHeight }
+
+    var body: some View {
+        GeometryReader { proxy in
+            Color.clear
+                .frame(width: proxy.size.width, height: proxy.size.height + lift)
+                .droppyGlassControlChrome(
+                    shape: AnyShape(PanelMenuMorphShape(progress: progress, lift: lift))
+                )
+                // The disc's own glass is the first circle; the menu's glass
+                // joins it only once it has started to open, so the two never
+                // sit on top of each other.
+                .opacity(Double(min(max(progress, 0) / 0.18, 1)))
+        }
+    }
 }
 
 /// One tool in the panel's more menu: the glyph and its word in a row. The
@@ -610,7 +722,9 @@ private struct PanelToolRow: View {
     var busy: Bool
     var disabled: Bool
     var rotation: Double = 0
-    var target: SidePanelChipTarget
+    /// Nil while the menu is folded: a hidden row must not publish a chip frame
+    /// the pointer can find behind the card.
+    var target: SidePanelChipTarget?
     var action: () -> Void
 
     @Environment(\.sidePanelChip) private var chip
@@ -890,8 +1004,7 @@ private struct TileBackground: View {
     var notch: SeamNotchShape.Edge?
     var titleTab: Bool = false
     var notchRadius: CGFloat = 24
-    /// The edge panel's tile is Liquid Glass over its card; the shelf keeps the
-    /// flat raised fill.
+    /// `glass` draws the box's frosted pane; false keeps the flat raised fill.
     var glass = false
     /// Overrides the shared tile radius; the edge panel asks for 24.
     var cornerRadius: CGFloat?
@@ -914,9 +1027,7 @@ private struct TileBackground: View {
     var body: some View {
         if glass {
             if let pocket {
-                Color.clear
-                    .droppyGlassControlChrome(shape: shape)
-                    .sidePanelTileBevel(shape: shape)
+                FrostedTileSurface(shape: shape)
                     .mask {
                         GlassPocketMask(
                             shape: shape,
@@ -926,13 +1037,67 @@ private struct TileBackground: View {
                         )
                     }
             } else {
-                Color.clear
-                    .droppyGlassControlChrome(shape: shape)
-                    .sidePanelTileBevel(shape: shape)
+                FrostedTileSurface(shape: shape)
             }
         } else {
             shape.fill(AdaptiveColors.notchSurfaceCardFill)
         }
+    }
+}
+
+/// The air and the edge fade every box's words share: the shelf's input, the
+/// edge panel's input and result, and the floating panel's two boxes.
+enum PanelTileText {
+    /// Air from a box's side rim. The text views add their 5pt paragraph
+    /// indent, so a line starts 13pt from the rim.
+    static let sideInset: CGFloat = DroppySpacing.sm
+    /// Air above and below the words. The top band is the fade's own height,
+    /// so the first line is sharp while the box rests at its top.
+    static let verticalAir: CGFloat = 16
+    /// The soft band at each rim: the input's 10% at its resting height,
+    /// capped so a tall result keeps the same 16pt rim.
+    static func fadeBand(for height: CGFloat) -> CGFloat {
+        min(verticalAir, height * 0.1)
+    }
+}
+
+/// The mask that fades a box's words where they meet its glass.
+struct PanelTileEdgeFade: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let band = PanelTileText.fadeBand(for: geometry.size.height)
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: band)
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: band)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+extension View {
+    /// Fades this view's top and bottom rim, as a box does with its words.
+    func panelTileEdgeFade() -> some View {
+        mask { PanelTileEdgeFade() }
+    }
+}
+
+/// A box's frosted pane.
+///
+/// The kit's glass control draws clear glass, which needs something bright
+/// behind it. A box sits on the card's black, so that glass came out invisible
+/// and only the words showed. The material keeps the pane visible on any
+/// surface, the shelf's included.
+struct FrostedTileSurface: View {
+    var shape: AnyShape
+
+    var body: some View {
+        shape
+            .fill(.ultraThinMaterial)
+            .sidePanelTileBevel(shape: shape)
     }
 }
 
@@ -992,11 +1157,54 @@ extension NSTextView {
     }
 }
 
+/// Keeps a shown panel's glass on its active face for as long as it is up.
+///
+/// macOS frosts every Liquid Glass layer in a window that is not key, and the
+/// card keeps showing long after the user has moved to another app. Releasing
+/// the appearance while the card is still on screen makes it flip to frost
+/// under the pointer, so the pin only decides whether it stays open — not how
+/// it looks. `acquireKeyAppearance` is the appearance AppKit gives its own
+/// menus in the same situation: the glass turns clear without the panel taking
+/// the keyboard from the app the user is working in. There is no public
+/// equivalent; the selector is guarded, so an OS without it keeps the system's
+/// inactive face.
+@MainActor
+final class PanelKeyAppearance {
+    private unowned let panel: NSWindow
+    private var held = false
+
+    init(panel: NSWindow) {
+        self.panel = panel
+    }
+
+    /// The pin decides whether the card stays open, never how it looks: an open
+    /// card keeps the face it had while pinned, so unpinning does not frost it
+    /// under the pointer. It is released only when the card folds or hides.
+    static func shouldHold(pinned: Bool, shown: Bool) -> Bool {
+        shown
+    }
+
+    /// Re-asserts on every call: AppKit can drop the appearance as the app and
+    /// its windows change key, so the flag alone would leave the card frosted.
+    func hold(_ hold: Bool) {
+        let selector = NSSelectorFromString(hold ? "acquireKeyAppearance" : "resignKeyAppearance")
+        guard panel.responds(to: selector) else { return }
+        if hold {
+            held = true
+            _ = panel.perform(selector)
+        } else if held {
+            held = false
+            _ = panel.perform(selector)
+        }
+    }
+}
+
 /// Puts back the light the system takes out of glass when its window is not
-/// key. A pinned panel is unfocused most of the time, and macOS dims every
-/// glass layer in it by a flat 24/255; the same lift returns the card to the
-/// face it wears while it is focused. Only the window decides this, so the
-/// panel reads `appearsActive` rather than the app's own state.
+/// key. When the key appearance cannot be held — an OS without the selector,
+/// or the moment before the hold lands — macOS dims every glass layer in the
+/// window by a flat 24/255; the same lift returns the card to the face it
+/// wears while it is focused. Only the window decides this, so the panel reads
+/// `appearsActive` rather than the app's own state.
 struct PanelGlassLift: ViewModifier {
     @Environment(\.appearsActive) private var appearsActive
     @StateObject private var theme = HostThemeStore()
@@ -1033,7 +1241,7 @@ extension View {
 
     /// A raised surface inside the widget, never a frame around it: the root
     /// stays bare. `notch` carves the swap pocket; `titleTab` the title dip.
-    /// `glass` draws the surface as Liquid Glass instead of the flat fill.
+    /// `glass` draws the box as a frosted pane instead of the flat fill.
     func tile(
         notch: SeamNotchShape.Edge? = nil,
         titleTab: Bool = false,
