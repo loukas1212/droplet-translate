@@ -64,12 +64,18 @@ struct SidePanelContentView: View {
 
     /// One line of text plus the editor's insets, so the empty box still has
     /// air above and below the placeholder. This is the shelf's short step.
-    static let minBoxHeight: CGFloat = 92
+    /// With the 244pt result it makes the second card 440pt.
+    static let minBoxHeight: CGFloat = 94
     /// The edge panel opens its empty box a little taller, so the card does
     /// not open pinched; its floor follows the panel, not the shelf's step.
-    static let panelBoxFloor: CGFloat = 112
-    /// Beyond this the editor scrolls instead of growing.
-    static let maxBoxHeight: CGFloat = 150
+    /// With the panel's chrome it opens the card at 300pt.
+    static let panelBoxFloor: CGFloat = 121
+    /// Beyond this the editor scrolls instead of growing. With the shelf's
+    /// chrome it makes the opening card 250pt.
+    static let maxBoxHeight: CGFloat = 154
+    /// The panel's own box cap: its tallest input lands the card on 330pt, or
+    /// 580pt with the result under it.
+    static let panelMaxBoxHeight: CGFloat = 151
 
     /// Air above and below the text, equal so a single line lands on the box's
     /// mid-height. The paste and clear discs sit inside the bottom inset, and
@@ -78,7 +84,8 @@ struct SidePanelContentView: View {
     private static let editorBottomInset: CGFloat = 37.5
     /// The translation box under the input at its resting height; the grip
     /// under the card stretches it taller. Below both sits the control strip.
-    static let resultBoxHeight: CGFloat = 240
+    /// With the shelf's 94pt short box it makes the second card 440pt.
+    static let resultBoxHeight: CGFloat = 244
     /// The transparent band below the card's face. The window grows by it, and
     /// the drag tab hangs in it.
     static let gripStrip: CGFloat = 36
@@ -89,7 +96,7 @@ struct SidePanelContentView: View {
     private static let resultGap: CGFloat = 6
     /// The footer holds the more disc plus the rim that separates it from the
     /// box above — the same 6pt as the header's.
-    private static let footerHeight: CGFloat = PanelFooterMetrics.disc + 6
+    private static let footerHeight: CGFloat = PanelFooterMetrics.footerHeight
     /// The panel's body text, its labels and its secondary text.
     static let bodyFontSize: CGFloat = 14
     static let labelFontSize: CGFloat = 13
@@ -274,27 +281,14 @@ struct SidePanelContentView: View {
         body - inset * 2 + pillStrip
     }
 
-    /// The shelf card's height for one step: the host's corner inset, the
-    /// language row when the step keeps it, the boxes and the footer. The
-    /// descriptor's height is the widget's whole rectangle, so the host's
-    /// inset is part of it.
-    static func shelfCardHeight(forRoom room: CGFloat, showsHeader: Bool) -> CGFloat {
-        DroppySpacing.sm * 2 + shelfContentHeight(forRoom: room, showsHeader: showsHeader)
-    }
-
-    /// The card's content without the host's corner inset. A notch card
-    /// spends the descriptor's extra 16pt on that inset; a solo island card
-    /// spends none and gives it to the boxes, so the footer stays on the
-    /// bottom edge in both.
-    static func shelfContentHeight(forRoom room: CGFloat, showsHeader: Bool) -> CGFloat {
-        (showsHeader ? LanguageMenu.pillRowHeight + rowGap : 0) + room + footerHeight
-    }
-
-    /// The room the shelf's second step gives the input and the full result.
-    static var shelfResultRoom: CGFloat { minBoxHeight + resultGap + resultBoxHeight }
-    /// The room the third step has once the language row is gone.
-    static var shelfFullRoom: CGFloat {
-        shelfResultRoom + LanguageMenu.pillRowHeight + rowGap
+    /// The room a shelf card of `height` leaves for its boxes: the host's
+    /// rectangle minus the 16pt a notch spends on its corner inset and the
+    /// header and footer. A solo island card spends no inset and gives the
+    /// 16pt to its boxes instead, so the footer stays on the bottom edge in
+    /// both.
+    static func shelfRoom(forCardHeight height: CGFloat, showsHeader: Bool) -> CGFloat {
+        let header = showsHeader ? LanguageMenu.pillRowHeight + rowGap : 0
+        return height - DroppySpacing.sm * 2 - header - footerHeight
     }
 
     /// The shortest the card opens to with the input alone. The shelf's step
@@ -302,9 +296,11 @@ struct SidePanelContentView: View {
     static var minBodyHeight: CGFloat { bodyHeight(forBox: minBoxHeight) }
     static var panelMinBodyHeight: CGFloat { bodyHeight(forBox: panelBoxFloor) }
     static var maxBodyHeight: CGFloat { bodyHeight(forBox: maxBoxHeight) }
+    /// The panel's tallest input alone, without a result under it.
+    static var panelMaxInputBodyHeight: CGFloat { bodyHeight(forBox: panelMaxBoxHeight) }
     /// The tallest card, with the result box open. The window clamp uses this.
     static var maxPanelBodyHeight: CGFloat {
-        bodyHeight(forBox: maxBoxHeight, result: true)
+        bodyHeight(forBox: panelMaxBoxHeight, result: true)
     }
 
     var body: some View {
@@ -330,7 +326,12 @@ struct SidePanelContentView: View {
                     editorBottomInset: Self.editorBottomInset,
                     onSubmit: onSubmit ?? model.translate,
                     onEditorHeight: { height in
-                        let clamped = min(max(height, boxFloor), Self.maxBoxHeight)
+                        // The shelf's box grows to the card's room; the panel's
+                        // cap is the one that lands its card on 330pt.
+                        let boxCap = keepsGripInsideCard
+                            ? Self.maxBoxHeight
+                            : Self.panelMaxBoxHeight
+                        let clamped = min(max(height, boxFloor), boxCap)
                         guard clamped != inputHeight else { return }
                         // The whole stack moves with the box: the header stays
                         // put, the footer travels, and the box's top never dips.
@@ -340,12 +341,12 @@ struct SidePanelContentView: View {
                     },
                     showsInlineTools: false,
                     bodyFontSize: Self.bodyFontSize,
-                    maxEditorHeight: keepsGripInsideCard && !showsResult
-                        ? closedInputHeight
-                        : Self.maxBoxHeight,
-                    scrollerCap: keepsGripInsideCard && !showsResult
-                        ? closedInputHeight
-                        : Self.maxBoxHeight,
+                    maxEditorHeight: keepsGripInsideCard
+                        ? (showsResult ? Self.maxBoxHeight : closedInputHeight)
+                        : Self.panelMaxBoxHeight,
+                    scrollerCap: keepsGripInsideCard
+                        ? (showsResult ? Self.maxBoxHeight : closedInputHeight)
+                        : Self.panelMaxBoxHeight,
                     hoverChrome: true,
                     // Folded, the tile's frame is the input's old height while
                     // the result covers it; marking it would draw a wash over
@@ -606,7 +607,10 @@ struct SidePanelContentView: View {
         guard displaysResult else { return max(inputHeight, shelfRoom) }
         if model.notice != nil, shelfStep == 0 { return 0 }
         if shelfStep == 2 { return 0 }
-        let shortBox = min(inputHeight, Self.minBoxHeight)
+        // As on the edge panel, the box takes the height its own words need,
+        // so the insets stay visible instead of the text scrolling under the
+        // rims. The card is fixed, so the result gives up the room.
+        let shortBox = min(max(inputHeight, Self.minBoxHeight), Self.maxBoxHeight)
         return shelfRoom - (shelfRoom - shortBox) * shelfGrowth
     }
 
@@ -706,9 +710,7 @@ struct SidePanelContentView: View {
             let shape = RoundedRectangle(cornerRadius: 29, style: .continuous)
             if glassTiles {
                 if resultOnScreen {
-                    Color.clear
-                        .droppyGlassControlChrome(shape: AnyShape(shape))
-                        .sidePanelTileBevel(shape: AnyShape(shape))
+                    FrostedTileSurface(shape: AnyShape(shape))
                         .mask {
                             GlassPocketMask(
                                 shape: AnyShape(shape),
@@ -719,9 +721,7 @@ struct SidePanelContentView: View {
                             )
                         }
                 } else {
-                    Color.clear
-                        .droppyGlassControlChrome(shape: AnyShape(shape))
-                        .sidePanelTileBevel(shape: AnyShape(shape))
+                    FrostedTileSurface(shape: AnyShape(shape))
                 }
             } else {
                 shape.fill(AdaptiveColors.notchSurfaceCardFill)
@@ -785,7 +785,9 @@ struct SidePanelContentView: View {
     /// whole steps.
     static let shelfGripLift: CGFloat = 12
     /// How far the pointer may pull the shelf's bar from its rest position.
-    static let shelfGripPullRange: ClosedRange<CGFloat> = -24...12
+    /// It travels as far up as down: the 12pt of air under the bar is the
+    /// room the card gives it, and a longer pull up read as a different handle.
+    static let shelfGripPullRange: ClosedRange<CGFloat> = -shelfGripLift...shelfGripLift
     static let gripHitSize = CGSize(width: gripWidth, height: gripStrip)
 
     /// The visible result height a drag of `translation` asks for, measured
@@ -1248,21 +1250,20 @@ struct SidePanelContentView: View {
         }
         .frame(height: Self.footerHeight, alignment: .bottom)
         .overlay(alignment: .bottomLeading) {
-            if model.isToolbarExpanded {
-                // The rows start on the footer's top edge, so the disc stays
-                // in sight under them and turns its dots upright.
-                PanelMoreMenu(
-                    model: model,
-                    requestCapture: requestCapture,
-                    requestSelection: requestSelection,
-                    cancelSelection: cancelSelection,
-                    onHover: { moreHover($0, inMenu: true) },
-                    pinned: onPin == nil ? nil : pin.isPinned,
-                    onPin: onPin
-                )
-                .offset(y: -Self.footerHeight)
-                .transition(.scale(scale: 0.96, anchor: .bottomLeading).combined(with: .opacity))
-            }
+            // The rows start on the footer's top edge, so the disc stays in
+            // sight under them and turns its dots upright. The menu stays
+            // mounted so its glass can fold back into the disc.
+            PanelMoreMenu(
+                model: model,
+                open: model.isToolbarExpanded,
+                requestCapture: requestCapture,
+                requestSelection: requestSelection,
+                cancelSelection: cancelSelection,
+                onHover: { moreHover($0, inMenu: true) },
+                pinned: onPin == nil ? nil : pin.isPinned,
+                onPin: onPin
+            )
+            .offset(y: -Self.footerHeight)
         }
     }
 
@@ -1617,9 +1618,6 @@ private struct PanelResultTile: View {
     /// below that it blurs in proportion to how closed the box is.
     private static let statusClearReveal: CGFloat = 0.75
     private static let statusBlurRamp: CGFloat = 0.15
-    /// The soft band at each rim, the input box's 10% at its resting height.
-    private static let edgeFadeBand: CGFloat = 16
-
     private var statusBlur: CGFloat {
         let closed = (Self.statusClearReveal - reveal) / Self.statusBlurRamp
         return SidePanelContentView.resultEdgeBlur * min(max(closed, 0), 1)
@@ -1718,26 +1716,12 @@ private struct PanelResultTile: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.leading, DroppySpacing.sm)
-            .padding(.trailing, DroppySpacing.sm)
+            .padding(.horizontal, PanelTileText.sideInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The rim the input box already keeps: words fade as they reach the
-        // glass instead of ending on a hard line. The input's share of its own
-        // height, capped: step 3's box is twice as tall, and a plain share
-        // would dim the first line.
-        .mask {
-            GeometryReader { geometry in
-                let band = min(Self.edgeFadeBand, geometry.size.height * 0.1)
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                        .frame(height: band)
-                    Color.black
-                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                        .frame(height: band)
-                }
-            }
-        }
+        // The same rim as every box: words fade as they reach the glass
+        // instead of ending on a hard line.
+        .panelTileEdgeFade()
         .overlay(alignment: .bottomTrailing) {
             if !model.output.isEmpty {
                 SidePanelPillButton(

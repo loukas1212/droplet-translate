@@ -143,26 +143,28 @@ struct TranslateWidget: View {
 enum ShelfHeightStep: Int, CaseIterable {
     case compact, medium, full
 
-    /// The input at its tallest, then the input over the full result box, then
-    /// the result on the whole face. The last two share a height; the third
-    /// spends the language row on the result.
-    var room: CGFloat {
+    /// The card's height at the Regular shelf size. The three steps are round
+    /// on purpose, so each is easy to remember and the host's fixed 48…480
+    /// range is never exceeded.
+    var height: CGFloat {
         switch self {
-        case .compact: SidePanelContentView.maxBoxHeight
-        case .medium: SidePanelContentView.shelfResultRoom
-        case .full: SidePanelContentView.shelfFullRoom
+        case .compact: 250
+        case .medium: 440
+        case .full: 480
         }
     }
 
     var showsHeader: Bool { self != .full }
 
-    /// The card's content without the host's corner inset.
-    var contentHeight: CGFloat {
-        SidePanelContentView.shelfContentHeight(forRoom: room, showsHeader: showsHeader)
+    /// The room the step leaves for its boxes, with the host's 16pt corner
+    /// inset removed as the descriptor budgets it.
+    var room: CGFloat {
+        SidePanelContentView.shelfRoom(forCardHeight: height, showsHeader: showsHeader)
     }
 
-    var height: CGFloat {
-        SidePanelContentView.shelfCardHeight(forRoom: room, showsHeader: showsHeader)
+    /// The card's content without the host's corner inset.
+    var contentHeight: CGFloat {
+        height - DroppySpacing.sm * 2
     }
 
     var next: ShelfHeightStep {

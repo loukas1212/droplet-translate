@@ -151,15 +151,6 @@ final class ScrollableNSTextView: CursorAwareTextView {
     }
 }
 
-private final class VerticalOnlyClipView: NSClipView {
-    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
-        var bounds = super.constrainBoundsRect(proposedBounds)
-        bounds.origin.x = 0
-        assert(bounds.origin.x == 0, "Input clip view must stay horizontally fixed")
-        return bounds
-    }
-}
-
 /// Forces the text view and its container to the viewport width, so a view
 /// created with long text before it has a real size cannot scroll sideways.
 final class InputScrollView: NSScrollView {
@@ -269,8 +260,8 @@ struct SourceTile: View {
     var notch: SeamNotchShape.Edge? = .bottom
     /// The edge panel lifts the language into a header above the tile.
     var showsLanguageMenu = true
-    /// The edge panel draws this surface as Liquid Glass; the shelf keeps the
-    /// flat raised fill.
+    /// The edge panel and the shelf draw this surface as a frosted pane; the
+    /// default keeps the flat raised fill for a mount that wants it.
     var glassTile = false
     /// The edge panel asks for its own tile radius; the shelf keeps the shared one.
     var tileCornerRadius: CGFloat?
@@ -336,19 +327,8 @@ struct SourceTile: View {
             // bigger share of the shelf.
             .frame(maxWidth: .infinity, minHeight: 52, maxHeight: maxEditorHeight)
             .clipped()
-            // Soft fade at the edges, as the result box does.
-            .mask {
-                LinearGradient(
-                    stops: [
-                        .init(color: .clear, location: 0),
-                        .init(color: .black, location: 0.1),
-                        .init(color: .black, location: 0.9),
-                        .init(color: .clear, location: 1)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
+            // Soft fade at the edges, as every box does.
+            .panelTileEdgeFade()
             .clipShape(
                 SeamNotchShape(
                     edge: notch,
@@ -372,9 +352,9 @@ struct SourceTile: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Same horizontal padding as the result box (leading + trailing = sm).
-        .padding(.leading, DroppySpacing.sm)
-        .padding(.trailing, DroppySpacing.sm)
+        // The same margin as every box: the text view's 5pt indent makes the
+        // first glyph start 13pt from the rim.
+        .padding(.horizontal, PanelTileText.sideInset)
         .tileHoverChrome(
             hoverChrome && chip == nil && hovering,
             cornerRadius: tileCornerRadius ?? TileMetrics.cornerRadius,
