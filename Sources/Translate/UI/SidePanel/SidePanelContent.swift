@@ -29,6 +29,8 @@ struct SidePanelContentView: View {
     /// The shelf's card cannot grow, so its handle keeps the bar inside the
     /// card and skips the tab that hangs below the panel's edge.
     var keepsGripInsideCard = false
+    /// The floating panel is sized by its content, so it carries no handle.
+    var showsGrip = true
     var glassTiles = true
     /// The tallest body this mount may draw; the shelf's fixed slot sets it.
     var maxBodyHeight = SidePanelContentView.maxPanelBodyHeight
@@ -190,6 +192,7 @@ struct SidePanelContentView: View {
         /// folded away. `fold` also seeds a half-fold for a render test.
         fold: CGFloat = 0,
         keepsGripInsideCard: Bool = false,
+        showsGrip: Bool = true,
         glassTiles: Bool = true,
         maxBodyHeight: CGFloat = SidePanelContentView.maxPanelBodyHeight,
         rowWidth: CGFloat = SidePanelContentView.defaultRowWidth,
@@ -212,6 +215,7 @@ struct SidePanelContentView: View {
         self.onGripOut = onGripOut
         self.onPin = onPin
         self.keepsGripInsideCard = keepsGripInsideCard
+        self.showsGrip = showsGrip
         self.glassTiles = glassTiles
         self.maxBodyHeight = maxBodyHeight
         self.boxFloor = boxFloor
@@ -423,7 +427,7 @@ struct SidePanelContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .overlay(alignment: .bottom) {
-                gripHandle
+                if showsGrip { gripHandle }
             }
 
             chipLayer

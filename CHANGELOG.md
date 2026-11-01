@@ -108,14 +108,12 @@ away again is not in it.
   theme Droppy is set to — Black, Liquid Glass, or Dynamic Glass — so the card
   changes with the notch and the shelf.
 - The floating panel is the edge panel's card in the panel's own rounded
-  outline: the same language row, the same boxes, the same handle and the same
-  footer, so a card behaves identically wherever it is asked to appear. It
-  opens empty from its own shortcut — set in Droppy's Shortcuts page, next to
-  the two capture shortcuts — and takes the keyboard in the text field, or
-  opens beside a capture with the result in it. The handle grows the edge
-  panel's lobe out of the card's bottom edge under the pointer, as one outline
-  with the face; a drag on it sizes the card, and a pull on the box folds the
-  original away to give the answer the room, as on the edge panel.
+  outline: the same language row, the same boxes and the same footer, so a card
+  behaves identically wherever it is asked to appear. It opens empty from its
+  own shortcut — set in Droppy's Shortcuts page, next to the two capture
+  shortcuts — and takes the keyboard in the text field, or opens beside a
+  capture with the result in it. The card ends at its face, with no handle
+  under it.
 - The floating panel wears the same themed surface and the same footer as the
   other surfaces: the more disc on the leading edge, and the Translate wordmark
   with its engine on the trailing edge. The footer keeps the same 6pt rim above

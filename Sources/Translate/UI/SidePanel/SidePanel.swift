@@ -1106,8 +1106,7 @@ final class SidePanel: NSPanel {
         if revealTarget == 0 { finishFold() }
     }
 
-    /// One frame of the grip's critically damped spring, shared with the
-    /// floating panel so its lobe leaves the card on the same beat.
+    /// One frame of the grip's critically damped spring.
     static func gripStep(
         _ value: CGFloat,
         velocity: CGFloat,
@@ -1725,22 +1724,13 @@ struct SidePanelUnifiedShape: Shape {
     /// inside the card, so the card's own outline is all that shows; the
     /// pointer brings it out.
     static func lobe(in card: CGRect, amount: CGFloat) -> Path? {
-        lobe(
-            centreX: card.midX,
-            flatBottom: card.maxY - SidePanelCardShape.filletRadius,
-            amount: amount
-        )
-    }
-
-    /// The same lobe under any card whose bottom edge is straight at
-    /// `flatBottom`, so the floating card grows the edge panel's handle.
-    static func lobe(centreX: CGFloat, flatBottom: CGFloat, amount: CGFloat) -> Path? {
         guard amount > 0.001 else { return nil }
+        let flatBottom = card.maxY - SidePanelCardShape.filletRadius
         let out = SidePanelContentView.gripCurveDepth - SidePanelContentView.gripOverlap
         let bottom = flatBottom + out - SidePanelContentView.gripRise * (1 - amount)
         return SidePanelGripShape(stem: SidePanelContentView.gripTuck).path(
             in: CGRect(
-                x: centreX - SidePanelContentView.gripWidth / 2,
+                x: card.midX - SidePanelContentView.gripWidth / 2,
                 y: bottom - SidePanelContentView.gripDepth,
                 width: SidePanelContentView.gripWidth,
                 height: SidePanelContentView.gripDepth

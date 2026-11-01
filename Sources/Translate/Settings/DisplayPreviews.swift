@@ -149,22 +149,19 @@ struct ResultDisplayPreview: View {
 struct FloatingSurfacePreview: View {
     @ObservedObject var model: TranslateModel
     @State private var chip = SidePanelChipState()
-    @State private var grip = SidePanelGripState()
     @State private var pin = SidePanelPinState()
 
     static let bodyHeight = SidePanelContentView.panelMinBodyHeight
-    /// The panel's window: the body plus the strip the handle hangs in, as the
-    /// shortcut opens it.
+    /// The panel's window is its body: the card has no strip below its face.
     static let cardSize = CGSize(
         width: SidePanel.expandedWidth,
-        height: bodyHeight + SidePanelContentView.pillStrip
+        height: bodyHeight
     )
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             // The sheet under the glass: the settings page is not the desktop,
-            // and glass over the page comes out grey. It stops at the card's
-            // face; the strip below belongs to the handle.
+            // and glass over the page comes out grey.
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
                     .fill(.black)
@@ -174,11 +171,10 @@ struct FloatingSurfacePreview: View {
                     )
                 )
             }
-            .frame(width: Self.cardSize.width, height: Self.bodyHeight)
+            .frame(width: Self.cardSize.width, height: Self.cardSize.height)
             FloatingPanelBody(
                 model: PreviewSample.widgetModel(model, showsResult: false),
                 chip: chip,
-                grip: grip,
                 pin: pin
             )
             .frame(width: Self.cardSize.width, height: Self.cardSize.height)

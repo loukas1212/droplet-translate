@@ -23,11 +23,10 @@ final class TranslationPanel: NSPanel {
     /// Whether the model's own card is the face on screen. A live card follows
     /// the model, so a result must not build a second one.
     private var wearsCard = false
-    /// The content's own controls: the sliding chip, the handle's amount and
-    /// the card's pin. They live here so the panel can resize without losing
-    /// them, exactly as the edge panel keeps them on its window.
+    /// The content's own controls: the sliding chip and the card's pin. They
+    /// live here so the panel can resize without losing them, exactly as the
+    /// edge panel keeps them on its window.
     private let chip = SidePanelChipState()
-    private let grip = SidePanelGripState()
     private let pin = SidePanelPinState()
     /// The card body the content asked for.
     private var bodyHeight = SidePanelContentView.panelMinBodyHeight
@@ -50,13 +49,6 @@ final class TranslationPanel: NSPanel {
     private var bloomPoint = CGPoint.zero
     private var bloomClosing = false
     private var lastBloomTick = CACurrentMediaTime()
-    /// The handle's lobe, stepped on the edge panel's grip spring: the lobe is
-    /// part of the card's outline, so it and the mark must leave the edge on
-    /// one amount rather than one easing ahead of the other.
-    private var gripLink: CADisplayLink?
-    private var gripTarget: CGFloat = 0
-    private var gripVelocity: CGFloat = 0
-    private var lastGripTick = CACurrentMediaTime()
     /// The dot the card grows out of; a panel with no capture grows from the
     /// pointer.
     static let bloomDot: CGFloat = 36
@@ -73,9 +65,9 @@ final class TranslationPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
-        // The handle is this card's drag surface. A background move carries
-        // the card up with an upward pull, so the grip never sees the reverse.
-        isMovableByWindowBackground = false
+        // The card is the window: a drag on its face moves the panel, as it
+        // did before the handle existed.
+        isMovableByWindowBackground = true
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -113,8 +105,8 @@ final class TranslationPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 
     /// The card is up and staying: the panel is on screen, wearing the model's
-    /// own card, and not folding away. Rebuilding that face would drop a grip
-    /// that is still held and move the card's top.
+    /// own card, and not folding away. Rebuilding that face would move the
+    /// card's top when the content is the same.
     private var keepsLiveCard: Bool {
         isVisible && wearsCard && !bloomClosing
     }
@@ -159,8 +151,7 @@ final class TranslationPanel: NSPanel {
         display(
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
-            height: Self.windowHeight(forBody: bodyHeight),
-            gripStrip: SidePanelContentView.pillStrip,
+            height: bodyHeight,
             near: rect,
             on: screen
         )
@@ -188,8 +179,7 @@ final class TranslationPanel: NSPanel {
         display(
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
-            height: Self.windowHeight(forBody: bodyHeight),
-            gripStrip: SidePanelContentView.pillStrip,
+            height: bodyHeight,
             near: rect,
             on: screen
         )
@@ -254,7 +244,6 @@ final class TranslationPanel: NSPanel {
 
     private func finishClosing() {
         stopBloom()
-        stopGripMotion()
         wearsCard = false
         if activation != nil {
             activation?.finish()
@@ -318,14 +307,12 @@ final class TranslationPanel: NSPanel {
             FloatingPanelBody(
                 model: model,
                 chip: chip,
-                grip: grip,
                 pin: pin,
                 requestCapture: requestCapture,
                 requestSelection: requestSelection,
                 cancelSelection: cancelSelection,
                 onClose: { [weak self] in self?.closePanel() },
                 onPin: { [weak self] in self?.togglePin() },
-                onGripOut: { [weak self] out in self?.setGripOut(out) },
                 onBodyHeight: { [weak self] height, animated in
                     Task { @MainActor in
                         self?.applyBodyHeight(height, animated: animated)
@@ -341,14 +328,6 @@ final class TranslationPanel: NSPanel {
                     .accessibilityHidden(true)
             )
         )
-    }
-
-    /// The window that holds a card body of `body`. The body already counts the
-    /// content's inset on every edge; the extra 44pt is the strip the handle
-    /// hangs in, the strip the edge panel keeps below its face. Without it the
-    /// footer and the handle are squeezed out of the card.
-    private static func windowHeight(forBody body: CGFloat) -> CGFloat {
-        body + SidePanelContentView.pillStrip
     }
 
     /// The content owns the card's height: it reports what the box and the
@@ -369,10 +348,7 @@ final class TranslationPanel: NSPanel {
         let resting = bloomLink == nil ? frame : bloomCard
         let target = Self.frameKeepingTop(
             resting,
-            size: CGSize(
-                width: resting.width,
-                height: Self.windowHeight(forBody: clamped)
-            )
+            size: CGSize(width: resting.width, height: clamped)
         )
         bloomCard = target
         guard bloomLink == nil else { return }
@@ -401,17 +377,11 @@ final class TranslationPanel: NSPanel {
         width: CGFloat,
         height: CGFloat?,
         minimumHeight: CGFloat = 140,
-        gripStrip: CGFloat = 0,
         near rect: CGRect?,
         on screen: NSScreen?
     ) {
         removeMonitor()
         stopKeyRetry()
-        // The content is rebuilt below with its handle at rest; the surface
-        // must start there too, or a lobe from the last session would hang
-        // under a card nobody is pointing at.
-        stopGripMotion()
-        grip.amount = 0
         // A result arriving while the card is still blooming starts the bloom
         // again from the same point, rather than snapping the card to full size.
         let interruptedBloom = bloomLink != nil
@@ -432,7 +402,7 @@ final class TranslationPanel: NSPanel {
         // panel's content, so the bloom scales it with the boxes and the tiles
         // sit on the themed glass instead of on the window's black.
         let surface = NSHostingView(
-            rootView: PanelSurfaceLayer(gripStrip: gripStrip, grip: grip)
+            rootView: PanelSurfaceLayer()
         )
         surface.appearance = NSAppearance(named: .darkAqua)
         surface.autoresizingMask = [.width, .height]
@@ -596,54 +566,6 @@ final class TranslationPanel: NSPanel {
         bloomLink = nil
     }
 
-    // MARK: - Grip
-
-    /// The pointer reached the handle: the lobe comes out of the card's edge on
-    /// the edge panel's grip spring, and goes back with the pointer. Reduce
-    /// Motion takes the end state at once.
-    private func setGripOut(_ out: Bool) {
-        gripTarget = out ? 1 : 0
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            stopGripMotion()
-            grip.amount = gripTarget
-            return
-        }
-        // A retarget keeps the running link and its velocity, so reversing
-        // mid-flight turns the lobe round instead of restarting it.
-        guard gripLink == nil, let hosting else { return }
-        lastGripTick = CACurrentMediaTime()
-        let link = hosting.displayLink(target: self, selector: #selector(stepGrip(_:)))
-        link.add(to: .main, forMode: .common)
-        gripLink = link
-    }
-
-    @objc private func stepGrip(_ link: CADisplayLink) {
-        let now = CACurrentMediaTime()
-        let dt = max(now - lastGripTick, 0)
-        lastGripTick = now
-        let step = SidePanel.gripStep(
-            grip.amount,
-            velocity: gripVelocity,
-            to: gripTarget,
-            dt: dt
-        )
-        gripVelocity = step.velocity
-        grip.amount = step.value
-        // The spring approaches without reaching; land on the target so the
-        // next hover starts from the edge's own place.
-        guard abs(step.value - gripTarget) < 0.001,
-              abs(step.velocity) < 0.001
-        else { return }
-        grip.amount = gripTarget
-        stopGripMotion()
-    }
-
-    private func stopGripMotion() {
-        gripLink?.invalidate()
-        gripLink = nil
-        gripVelocity = 0
-    }
-
     @objc private func stepBloom(_ link: CADisplayLink) {
         let now = CACurrentMediaTime()
         let dt = max(now - lastBloomTick, 0)
@@ -781,37 +703,24 @@ private let panelTileRadius: CGFloat = 29
 struct FloatingPanelBody: View {
     @ObservedObject var model: TranslateModel
     @ObservedObject var chip: SidePanelChipState
-    @ObservedObject var grip: SidePanelGripState
     @ObservedObject var pin: SidePanelPinState
     var requestCapture: () -> Void = {}
     var requestSelection: () -> Void = {}
     var cancelSelection: () -> Void = {}
     var onClose: () -> Void = {}
     var onPin: () -> Void = {}
-    /// The panel drives the handle on the edge panel's spring; a preview with
-    /// no host takes the simple hover instead.
-    var onGripOut: ((Bool) -> Void)? = nil
     var onBodyHeight: (CGFloat, Bool) -> Void = { _, _ in }
 
     var body: some View {
         SidePanelContentView(
             model: model,
             chip: chip,
-            grip: grip,
             pin: pin,
             requestCapture: requestCapture,
             requestSelection: requestSelection,
             cancelSelection: cancelSelection,
             boxFloor: SidePanelContentView.panelBoxFloor,
-            onGripOut: { out in
-                if let onGripOut {
-                    onGripOut(out)
-                } else {
-                    withAnimation(DroppyAnimation.hover) {
-                        grip.amount = out ? 1 : 0
-                    }
-                }
-            },
+            showsGrip: false,
             onPin: onPin,
             onBodyHeight: onBodyHeight
         )
@@ -869,53 +778,14 @@ private struct PanelSurfaceBackdrop: View {
 /// same way the edge panel's `SidePanelGlassHost` does, so the card is one
 /// layer under the boxes.
 private struct PanelSurfaceLayer: View {
-    /// The strip under the face where the handle sits. The glass stops at the
-    /// face, so the handle hangs below the card as it does on the edge panel
-    /// instead of sitting in a band of its own.
-    var gripStrip: CGFloat = 0
-    /// The handle's amount, shared with the content: the card grows its lobe
-    /// out of the same state the mark rides, so the two cannot drift apart.
-    @ObservedObject var grip: SidePanelGripState
-
     var body: some View {
         SidePanelCardSurface(
             shape: AnyShape(
-                FloatingCardShape(strip: gripStrip, gripAmount: grip.amount)
+                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
             )
         )
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-}
-
-/// The floating card: the rounded face and the handle's lobe under it as one
-/// outline, the way the edge panel draws its own card.
-struct FloatingCardShape: Shape {
-    /// The transparent strip below the face; nothing is drawn in it but the
-    /// lobe.
-    var strip: CGFloat = 0
-    /// 0 is the lobe inside the card, 1 is the lobe hanging out of it.
-    var gripAmount: CGFloat = 0
-
-    func path(in rect: CGRect) -> Path {
-        let face = CGRect(
-            x: rect.minX,
-            y: rect.minY,
-            width: rect.width,
-            height: max(rect.height - strip, 1)
-        )
-        let card = RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-            .path(in: face)
-        guard strip > 0,
-              let lobe = SidePanelUnifiedShape.lobe(
-                  centreX: face.midX,
-                  flatBottom: face.maxY,
-                  amount: gripAmount
-              )
-        else {
-            return card
-        }
-        return Path(card.cgPath.union(lobe.cgPath, using: .winding))
     }
 }
 
