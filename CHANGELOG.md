@@ -119,9 +119,9 @@ away again is not in it.
   lines. It is the edge panel's card beside a capture:
   the same width, tile radius and type scale, so a result reads the same on
   both. Its input and result boxes carry the edge panel's frosted pane, text
-  margin and soft rim fade, and name their language on the card above the box,
-  so each box reads as a raised sheet and its words start at the box's own
-  edge instead of floating on black.
+  margin and soft rim fade, and name their language at the box's own top edge,
+  so each picker travels with the words it belongs to and the words start at
+  the box's edge instead of floating on black.
 - The target language sits in the result's header as a menu with a chevron;
   choosing another language translates the source again. Pin stays in the more
   menu, so the header keeps only the picker and the close disc; the panel keeps

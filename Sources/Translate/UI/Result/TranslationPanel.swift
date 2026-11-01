@@ -757,10 +757,10 @@ struct ResultWindowView: View {
             // disc, as on the shelf and the edge panel; the box takes the rest.
             VStack(spacing: 0) {
                 if showsOriginal, !source.isEmpty {
-                    sourceSection
+                    sourceTile
                         .padding(.bottom, DroppySpacing.smd)
                 }
-                resultSection
+                resultTile
                 footer
             }
             chipLayer
@@ -831,10 +831,9 @@ struct ResultWindowView: View {
         )
     }
 
-    /// The original and its language, the label on the card above the box as
-    /// the edge panel puts its language row above the input. The words take
-    /// the box's top edge, not a label's row.
-    private var sourceSection: some View {
+    /// The original, its language and its words in one box: the picker keeps
+    /// the box's top edge, so it travels with the words it belongs to.
+    private var sourceTile: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.xs) {
             LanguageMenu(
                 model: model,
@@ -847,11 +846,12 @@ struct ResultWindowView: View {
             )
             .padding(.leading, PanelTileText.sideInset)
             .chipTarget(.source)
-            sourceTile
+            sourceWords
         }
+        .background { tileGlass }
     }
 
-    private var sourceTile: some View {
+    private var sourceWords: some View {
         TranslationOutputScrollView(
             text: source,
             resetToken: "",
@@ -860,14 +860,13 @@ struct ResultWindowView: View {
             textInset: PanelTileText.verticalAir,
             fontSize: SidePanelContentView.bodyFontSize
         )
-        // The words keep the same air; the pane they scroll behind now reaches
-        // the box's rim, so a cut line fades there instead of stopping above it.
+        // The words keep the same air; the pane they scroll behind reaches the
+        // box's rim, so a cut line fades there instead of stopping above it.
         .frame(height: Self.sourceHeight(for: source) + PanelTileText.verticalAir * 2)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PanelTileText.sideInset)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .panelTileEdgeFade()
-        .background { tileGlass }
     }
 
     /// The source keeps a short box; a capture longer than the cap scrolls
@@ -880,9 +879,9 @@ struct ResultWindowView: View {
         model.sourceID == TranslateModel.auto ? sourceName : model.name(for: model.sourceID)
     }
 
-    /// The result and its language, with the same label above the box.
-    /// Changing the picker translates the source again.
-    private var resultSection: some View {
+    /// The result, its language and its words in the same box. Changing the
+    /// picker translates the source again.
+    private var resultTile: some View {
         VStack(alignment: .leading, spacing: DroppySpacing.xs) {
             LanguageMenu(
                 model: model,
@@ -896,11 +895,20 @@ struct ResultWindowView: View {
             )
             .padding(.leading, PanelTileText.sideInset)
             .chipTarget(.target)
-            resultTile
+            resultWords
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The copy sits on the tile's bottom edge, as on the edge panel's
+        // result box, and outside the fade so its word stays sharp.
+        .overlay(alignment: .bottomTrailing) {
+            copyButton
+                .padding(.trailing, DroppySpacing.sm)
+                .padding(.bottom, DroppySpacing.sm)
+        }
+        .background { tileGlass }
     }
 
-    private var resultTile: some View {
+    private var resultWords: some View {
         TranslationOutputScrollView(
             text: translated,
             resetToken: "",
@@ -913,14 +921,6 @@ struct ResultWindowView: View {
         .padding(.horizontal, PanelTileText.sideInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .panelTileEdgeFade()
-        // The copy sits on the tile's bottom edge, as on the edge panel's
-        // result box, and outside the fade so its word stays sharp.
-        .overlay(alignment: .bottomTrailing) {
-            copyButton
-                .padding(.trailing, DroppySpacing.sm)
-                .padding(.bottom, DroppySpacing.sm)
-        }
-        .background { tileGlass }
     }
 
     private var copyButton: some View {
