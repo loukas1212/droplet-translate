@@ -20,6 +20,14 @@ final class TranslationPanel: NSPanel {
     private var keyTask: Task<Void, Never>?
     private var interactive = false
     private var pinned = false
+    /// The content's own controls: the sliding chip, the handle's amount and
+    /// the card's pin. They live here so the panel can resize without losing
+    /// them, exactly as the edge panel keeps them on its window.
+    private let chip = SidePanelChipState()
+    private let grip = SidePanelGripState()
+    private let pin = SidePanelPinState()
+    /// The card body the content asked for.
+    private var bodyHeight = SidePanelContentView.panelMinBodyHeight
     /// The glass's active face while a pinned panel is not the key window.
     private lazy var keyAppearance = PanelKeyAppearance(panel: self)
     private var requestCapture: () -> Void = {}
@@ -115,37 +123,39 @@ final class TranslationPanel: NSPanel {
         on screen: NSScreen?
     ) {
         interactive = true
-        // The floating panel is the edge panel's card, seen beside the capture:
-        // same width and type scale, so a result reads the same on both.
-        let width: CGFloat = SidePanel.expandedWidth
+        bodyHeight = SidePanelContentView.bodyHeight(
+            forBox: SidePanelContentView.panelBoxFloor,
+            result: true
+        )
         display(
-            content: AnyView(ResultWindowView(
-                model: model,
-                translated: translated,
-                source: source,
-                sourceName: sourceName,
-                pinned: pinned,
-                showsOriginal: showsOriginal,
-                colorScheme: model.surfaceColorScheme,
-                backdrop: .windowSurface,
-                onCopy: { onCopy(translated) },
-                onClose: { [weak self] in self?.closePanel() },
-                onPin: { [weak self] in self?.togglePin() },
-                requestCapture: requestCapture,
-                requestSelection: requestSelection,
-                cancelSelection: cancelSelection
-            )),
-            width: width,
-            height: ResultWindowView.cardHeight(
-                forWidth: width,
-                translated: translated,
-                source: source,
-                showsOriginal: showsOriginal
-            ),
+            content: floatingContent(model: model),
+            width: SidePanel.expandedWidth,
+            height: bodyHeight,
             near: rect,
             on: screen
         )
         if !pinned { installMonitor() }
+    }
+
+    /// The panel with an empty box, opened from its shortcut: the same card
+    /// the edge panel opens, with the keyboard in the field.
+    func showEmpty(
+        model: TranslateModel,
+        near rect: CGRect? = nil,
+        on screen: NSScreen? = nil
+    ) {
+        interactive = true
+        pinned = false
+        pin.isPinned = false
+        bodyHeight = SidePanelContentView.panelMinBodyHeight
+        display(
+            content: floatingContent(model: model),
+            width: SidePanel.expandedWidth,
+            height: bodyHeight,
+            near: rect,
+            on: screen
+        )
+        installMonitor()
     }
 
     /// A terminal status in the chosen destination.
@@ -180,6 +190,7 @@ final class TranslationPanel: NSPanel {
     /// Closes the panel and hands focus back to the app it covered.
     func closePanel(animated: Bool = true) {
         pinned = false
+        pin.isPinned = false
         removeMonitor()
         stopKeyRetry()
         // Fold back into the dot the card grew from. A fold that starts while
@@ -219,6 +230,7 @@ final class TranslationPanel: NSPanel {
     /// The pin keeps the panel up when the user clicks elsewhere.
     private func togglePin() {
         pinned.toggle()
+        pin.isPinned = pinned
         if pinned {
             removeMonitor()
         } else {
@@ -250,6 +262,57 @@ final class TranslationPanel: NSPanel {
         )
     }
 
+    /// The panel's body: the edge panel's own card, drawn in the floating
+    /// panel's rounded outline. Everything the edge panel offers — the
+    /// language row, the boxes, the handle, the more menu, the footer — comes
+    /// from this one view, so the two surfaces cannot drift apart.
+    private func floatingContent(model: TranslateModel) -> AnyView {
+        AnyView(
+            FloatingPanelBody(
+                model: model,
+                chip: chip,
+                grip: grip,
+                pin: pin,
+                requestCapture: requestCapture,
+                requestSelection: requestSelection,
+                cancelSelection: cancelSelection,
+                onClose: { [weak self] in self?.closePanel() },
+                onPin: { [weak self] in self?.togglePin() },
+                onBodyHeight: { [weak self] height, animated in
+                    Task { @MainActor in
+                        self?.applyBodyHeight(height, animated: animated)
+                    }
+                }
+            )
+            .background(
+                Button("") { [weak self] in self?.closePanel() }
+                    .keyboardShortcut(.cancelAction)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            )
+        )
+    }
+
+    /// The content owns the card's height: it reports what the box and the
+    /// result need, and the window follows, keeping its top edge so the line
+    /// being typed stays where the eye left it.
+    private func applyBodyHeight(_ height: CGFloat, animated: Bool) {
+        let clamped = min(
+            max(height, SidePanelContentView.panelMinBodyHeight),
+            SidePanelContentView.maxPanelBodyHeight
+        )
+        guard abs(clamped - bodyHeight) > 0.5 else { return }
+        bodyHeight = clamped
+        guard isVisible, bloomLink == nil else { return }
+        var target = frame
+        target.size.height = clamped
+        target.origin.y = frame.maxY - clamped
+        bloomCard = target
+        place(bloom: target)
+    }
+
     // MARK: - Display
 
     /// - Parameters:
@@ -271,6 +334,9 @@ final class TranslationPanel: NSPanel {
         stopBloom()
 
         let hosting = NSHostingView(rootView: AnyView(content.panelGlassLift()))
+        // The card is the app's dark glass whatever the system is set to, so
+        // its ink follows the card, as it does on the edge panel.
+        hosting.appearance = NSAppearance(named: .darkAqua)
         hosting.wantsLayer = true
         hosting.frame = NSRect(
             origin: .zero,
@@ -543,9 +609,43 @@ final class TranslationPanel: NSPanel {
 
 // MARK: - Content
 
-private let panelRadius: CGFloat = 44
+let panelRadius: CGFloat = 44
 
 private let panelTileRadius: CGFloat = 29
+
+/// The floating panel's content: the edge panel's card, drawn in the panel's
+/// own rounded outline. The settings picture draws this same view, so what the
+/// user previews is the card the shortcut opens.
+struct FloatingPanelBody: View {
+    @ObservedObject var model: TranslateModel
+    @ObservedObject var chip: SidePanelChipState
+    @ObservedObject var grip: SidePanelGripState
+    @ObservedObject var pin: SidePanelPinState
+    var requestCapture: () -> Void = {}
+    var requestSelection: () -> Void = {}
+    var cancelSelection: () -> Void = {}
+    var onClose: () -> Void = {}
+    var onPin: () -> Void = {}
+    var onBodyHeight: (CGFloat, Bool) -> Void = { _, _ in }
+
+    var body: some View {
+        SidePanelContentView(
+            model: model,
+            chip: chip,
+            grip: grip,
+            pin: pin,
+            requestCapture: requestCapture,
+            requestSelection: requestSelection,
+            cancelSelection: cancelSelection,
+            boxFloor: SidePanelContentView.panelBoxFloor,
+            keepsGripInsideCard: true,
+            onGripOut: { out in grip.amount = out ? 1 : 0 },
+            onPin: onPin,
+            onBodyHeight: onBodyHeight
+        )
+        .padding(SidePanelContentView.inset)
+    }
+}
 
 private let panelInset = DroppySpacing.lg
 

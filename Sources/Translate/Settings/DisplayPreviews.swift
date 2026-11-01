@@ -43,15 +43,14 @@ struct ResultDisplayPreview: View {
 
     /// The size this shelf widget declares to the host.
     private static let shelfWidth: CGFloat = 440
-    private static let panelWidth: CGFloat = 460
 
     /// The box every picture is drawn into. Its width is the shelf's, so a
     /// picture never reads wider than its siblings; its height is the tallest
-    /// card a picture shows (the floating panel with an original), so that
-    /// one still fills the width instead of shrinking to fit a short stage.
+    /// card a picture shows, so the widest one still fills the width instead of
+    /// shrinking to fit a short stage.
     static let stageSize = CGSize(
         width: 440,
-        height: ResultWindowView.minimumHeightWithOriginal
+        height: SidePanel.cardHeight(forBody: SidePanelContentView.panelMinBodyHeight)
     )
 
     var body: some View {
@@ -89,14 +88,9 @@ struct ResultDisplayPreview: View {
         switch display {
         case .normal: return shelfSurfaceSize
         case .panel:
-            // The measured card: the result alone, or with the original above
-            // it, both including the footer the siblings wear.
-            return CGSize(
-                width: Self.panelWidth,
-                height: model.resultContent.showsOriginal
-                    ? ResultWindowView.minimumHeightWithOriginal
-                    : ResultWindowView.minimumHeight
-            )
+            // The floating panel's own card: the edge panel's body in the
+            // rounded outline, as the shortcut opens it.
+            return FloatingSurfacePreview.cardSize
         case .sidePanel: return sidePanelSurfaceSize
         }
     }
@@ -133,28 +127,12 @@ struct ResultDisplayPreview: View {
                 alignment: .topLeading
             )
         case .panel:
-            let sample = PreviewSample.forTarget(model.targetID)
-            ResultWindowView(
-                model: model,
-                translated: sample.result,
-                source: sample.source,
-                sourceName: model.name(for: sample.sourceLanguage),
-                pinned: false,
-                showsOriginal: model.resultContent.showsOriginal,
-                colorScheme: model.surfaceColorScheme,
-                backdrop: .hostGlassOnBlack,
-                onCopy: {},
-                onClose: {},
-                onPin: {}
-            )
-            .frame(width: Self.panelWidth)
-            .fixedSize(horizontal: false, vertical: true)
-            .environment(\.colorScheme, model.surfaceColorScheme)
-            .frame(
-                width: surfaceSize.width,
-                height: surfaceSize.height,
-                alignment: .top
-            )
+            FloatingSurfacePreview(model: model)
+                .frame(
+                    width: surfaceSize.width,
+                    height: surfaceSize.height,
+                    alignment: .top
+                )
         case .sidePanel:
             SidePanelSurfacePreview(model: model)
                 .frame(
@@ -163,6 +141,42 @@ struct ResultDisplayPreview: View {
                     alignment: .topLeading
                 )
         }
+    }
+}
+
+/// The droplet's own floating panel: the edge panel's card in the panel's
+/// rounded outline, as the shortcut opens it, before a result is in it.
+struct FloatingSurfacePreview: View {
+    @ObservedObject var model: TranslateModel
+    @State private var chip = SidePanelChipState()
+    @State private var grip = SidePanelGripState()
+    @State private var pin = SidePanelPinState()
+
+    static let bodyHeight = SidePanelContentView.panelMinBodyHeight
+    static let cardSize = CGSize(
+        width: SidePanel.expandedWidth,
+        height: bodyHeight
+    )
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // The sheet under the glass: the settings page is not the desktop,
+            // and glass over the page comes out grey.
+            RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+                .fill(.black)
+            SidePanelCardSurface(
+                shape: AnyShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
+            )
+            FloatingPanelBody(
+                model: PreviewSample.widgetModel(model, showsResult: false),
+                chip: chip,
+                grip: grip,
+                pin: pin
+            )
+            .frame(width: Self.cardSize.width, height: Self.cardSize.height)
+        }
+        .frame(width: Self.cardSize.width, height: Self.cardSize.height)
+        .environment(\.colorScheme, model.surfaceColorScheme)
     }
 }
 

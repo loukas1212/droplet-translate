@@ -251,21 +251,18 @@ struct SettingsPaneLayoutTests {
     func displayPreviewFitsTheStage() {
         let stage = ResultDisplayPreview.stageSize
         #expect(stage.width == 440)
-        #expect(stage.height == ResultWindowView.minimumHeightWithOriginal)
+        #expect(stage.height == SidePanel.cardHeight(forBody: SidePanelContentView.panelMinBodyHeight))
 
-        // The two-box panel is the tallest picture. It still fills the stage's
-        // width, so it reads the same size as the shelf beside it instead of
-        // shrinking to a thumbnail.
-        let twoBoxes = ResultDisplayPreview.previewScale(
-            surfaceSize: CGSize(
-                width: 460,
-                height: ResultWindowView.minimumHeightWithOriginal
-            ),
+        // The floating panel's card is the widest picture. It still fills the
+        // stage's width, so it reads the same size as the shelf beside it
+        // instead of shrinking to a thumbnail.
+        let floating = ResultDisplayPreview.previewScale(
+            surfaceSize: FloatingSurfacePreview.cardSize,
             stageSize: stage
         )
-        #expect(abs(460 * twoBoxes - stage.width) < 0.001)
+        #expect(abs(FloatingSurfacePreview.cardSize.width * floating - stage.width) < 0.001)
         #expect(
-            ResultWindowView.minimumHeightWithOriginal * twoBoxes
+            FloatingSurfacePreview.cardSize.height * floating
                 <= stage.height + 0.001
         )
 

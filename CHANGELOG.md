@@ -107,6 +107,14 @@ away again is not in it.
 - The edge panel wears the app's theme, like the rest: its glass follows the
   theme Droppy is set to — Black, Liquid Glass, or Dynamic Glass — so the card
   changes with the notch and the shelf.
+- The floating panel is the edge panel's card in the panel's own rounded
+  outline: the same language row, the same boxes, the same handle and the same
+  footer, so a card behaves identically wherever it is asked to appear. It
+  opens empty from its own shortcut — set in Droppy's Shortcuts page, next to
+  the two capture shortcuts — and takes the keyboard in the text field, or
+  opens beside a capture with the result in it. A drag on its handle sizes the
+  card, and a pull on the box folds the original away to give the answer the
+  room, as on the edge panel.
 - The floating panel wears the same themed surface and the same footer as the
   other surfaces: the more disc on the leading edge, and the Translate wordmark
   with its engine on the trailing edge. The footer keeps the same 6pt rim above
@@ -116,14 +124,6 @@ away again is not in it.
   and its glass starts as the disc's circle and slides up into the menu's
   rounded rectangle, so the background comes out of the button before the rows
   arrive.
-  The result alone keeps the shelf's short height as its floor; an original
-  opens the same card a little taller, the language row over the original's
-  box and the result's, and the card grows with either up to 600pt, where a
-  longer result scrolls under an original capped at four lines. It is the
-  edge panel's card beside a capture:
-  the same width, tile radius and type scale, so a result reads the same on
-  both. Its boxes carry the edge panel's frosted pane, text margin and soft
-  rim fade.
 - With an original, the two languages sit in one glass row at the card's top,
   as on the shelf: the pair ends on the edge of the swap disc that the row
   cuts its pocket for, so the disc's lower half sits in the input box's top

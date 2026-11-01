@@ -82,6 +82,7 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
         // the moment the droplet is off.
         host?.shortcuts.unregister(id: "select-text")
         host?.shortcuts.unregister(id: "capture-region")
+        host?.shortcuts.unregister(id: "open-panel")
         host = nil
     }
 
@@ -103,6 +104,14 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
             defaultShortcut: nil
         ) { [weak self] in
             self?.capture.requestRegion()
+        }
+        host.shortcuts.register(
+            id: "open-panel",
+            title: L10n.tr("settings.shortcuts.panel"),
+            defaultShortcut: nil
+        ) { [weak self] in
+            guard let self else { return }
+            TranslationPanel.shared.showEmpty(model: self.model)
         }
     }
 }
