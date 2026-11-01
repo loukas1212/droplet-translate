@@ -28,6 +28,9 @@ final class TranslationPanel: NSPanel {
     private let pin = SidePanelPinState()
     /// The card body the content asked for.
     private var bodyHeight = SidePanelContentView.panelMinBodyHeight
+    /// Whether the panel opened from its shortcut for the user to type in. A
+    /// card opened on a result leaves the keyboard where it is.
+    private var focusesEditor = false
     /// The glass's active face while a pinned panel is not the key window.
     private lazy var keyAppearance = PanelKeyAppearance(panel: self)
     private var requestCapture: () -> Void = {}
@@ -123,6 +126,7 @@ final class TranslationPanel: NSPanel {
         on screen: NSScreen?
     ) {
         interactive = true
+        focusesEditor = false
         bodyHeight = SidePanelContentView.bodyHeight(
             forBox: SidePanelContentView.panelBoxFloor,
             result: true
@@ -145,6 +149,7 @@ final class TranslationPanel: NSPanel {
         on screen: NSScreen? = nil
     ) {
         interactive = true
+        focusesEditor = true
         pinned = false
         pin.isPinned = false
         bodyHeight = SidePanelContentView.panelMinBodyHeight
@@ -168,6 +173,7 @@ final class TranslationPanel: NSPanel {
         on screen: NSScreen?
     ) {
         interactive = true
+        focusesEditor = false
         pinned = false
         display(
             content: AnyView(ResultWindowStatusView(
@@ -189,6 +195,7 @@ final class TranslationPanel: NSPanel {
 
     /// Closes the panel and hands focus back to the app it covered.
     func closePanel(animated: Bool = true) {
+        focusesEditor = false
         pinned = false
         pin.isPinned = false
         removeMonitor()
@@ -440,6 +447,7 @@ final class TranslationPanel: NSPanel {
         // App activation can hand the key back to the host's window; retake it
         // until it sticks.
         startKeyRetry()
+        if focusesEditor { takeEditorFocus() }
         if opening { startBloom(closing: false) }
         updateKeyAppearance()
     }
@@ -612,6 +620,33 @@ final class TranslationPanel: NSPanel {
     private func stopKeyRetry() {
         keyTask?.cancel()
         keyTask = nil
+    }
+
+    /// The shortcut opens the card to type in, so the field takes the keyboard
+    /// itself. Activation can move the first responder after the card opens,
+    /// so the ask is repeated for the same few turns the key retry uses.
+    private func takeEditorFocus() {
+        Task { @MainActor [weak self] in
+            for _ in 0..<5 {
+                guard let self, self.focusesEditor, self.isVisible else { return }
+                if let content = self.contentView,
+                   let editor = Self.firstEditor(in: content) {
+                    if self.firstResponder === editor { return }
+                    self.makeFirstResponder(editor)
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    /// The input box's editor: the first editable text view on the card. The
+    /// menus' labels are not editable.
+    private static func firstEditor(in view: NSView) -> NSTextView? {
+        if let text = view as? NSTextView, text.isEditable { return text }
+        for subview in view.subviews {
+            if let found = firstEditor(in: subview) { return found }
+        }
+        return nil
     }
 }
 
