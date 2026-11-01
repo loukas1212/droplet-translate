@@ -98,24 +98,34 @@ away again is not in it.
 - The edge panel opens with its empty input box a little taller than the
   shelf's short step, so the card does not open pinched.
 - The edge panel's more menu can pin the card: an outside click no longer folds
-  it, and the pin clears when the card closes or the user unpins it. A pinned
-  card keeps the lit glass while the app is in the background: it holds the
-  face it had while the app was active, so switching away does not dim it; a
-  click brings the live card back.
-- The edge panel wears the app's own surface, like the rest: the host's glass
-  follows the theme Droppy is set to — Black, Liquid Glass, or Dynamic Glass —
-  so the card changes with the notch and the shelf.
+  it, and the pin clears when the card closes or the user unpins it. The card
+  keeps the clear, focused face for as long as it is open — in front, in the
+  background, or the moment it is unpinned — instead of taking the system's
+  frosted inactive one, and a click brings Droppy forward.
+- The edge panel wears the app's theme, like the rest: its glass follows the
+  theme Droppy is set to — Black, Liquid Glass, or Dynamic Glass — so the card
+  changes with the notch and the shelf.
 - The floating panel wears the same themed surface and the same footer as the
   other surfaces: the more disc on the leading edge, and the Translate wordmark
-  with its engine on the trailing edge. Its more menu opens upward from the
-  disc in one column, on the same spring as the shelf and the edge panel, and
-  the card keeps the shelf's short height as its floor, so the menu's top row
-  never meets the card's rim. It is the edge panel's card beside a capture:
+  with its engine on the trailing edge. The footer keeps the same 6pt rim above
+  the disc as the shelf and the edge panel, so the more menu sits as close to
+  the result box as it does on the other cards. Its more menu opens upward from
+  the disc in one column, on the same spring as the shelf and the edge panel,
+  and its glass starts as the disc's circle and slides up into the menu's
+  rounded rectangle, so the background comes out of the button before the rows
+  arrive.
+  The card keeps the shelf's short height as its floor and grows with the
+  result, up to 600pt; a longer result scrolls under an original capped at four
+  lines. It is the edge panel's card beside a capture:
   the same width, tile radius and type scale, so a result reads the same on
-  both.
+  both. Its input and result boxes carry the edge panel's frosted pane, text
+  margin and soft rim fade, and name their language on the card above the box,
+  so each box reads as a raised sheet and its words start at the box's own
+  edge instead of floating on black.
 - The target language sits in the result's header as a menu with a chevron;
   choosing another language translates the source again. Pin stays in the more
-  menu, so the header keeps only the picker and the close disc.
+  menu, so the header keeps only the picker and the close disc; the panel keeps
+  the clear glass while it is open, like the edge card.
 - The floating panel blooms out of the point the result came from: the card and
   everything on it grow on a radius from a dot at the captured region, run a
   little past their size and settle, and the words come in as the card is
@@ -134,6 +144,8 @@ away again is not in it.
 
 - The shelf wears the edge panel's card: the language row with the swap disc,
   the input box, the result box and the footer with the tools and the engine.
+  The boxes are the edge panel's frosted panes, so they stay visible on the
+  card instead of reading as text on black.
 - The shelf opens with the input alone, as the edge panel does; its result
   box waits until the card is grown.
 - Type or paste text on the shelf and press Return, or tap the bar under the
