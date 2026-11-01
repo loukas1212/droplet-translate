@@ -1172,7 +1172,7 @@ struct PanelRenderTests {
         )
         window.contentView = hosting
 
-        let expected: [SidePanelChipTarget] = [.source, .target, .copy, .more, .engine]
+        let expected: [SidePanelChipTarget] = [.source, .target, .swap, .copy, .more, .engine]
         let deadline = Date().addingTimeInterval(30)
         while !expected.allSatisfy({ chip.frames[$0] != nil }), Date() < deadline {
             hosting.layoutSubtreeIfNeeded()
@@ -1187,18 +1187,30 @@ struct PanelRenderTests {
             )
         }
 
-        chip.target = .copy
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(chip.covers(.copy), "the chip does not cover the copy control")
-        hosting.layoutSubtreeIfNeeded()
-        if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
-            hosting.cacheDisplay(in: hosting.bounds, to: rep)
-            if let data = rep.representation(using: .png, properties: [:]) {
-                try FileManager.default.createDirectory(
-                    at: Self.folder,
-                    withIntermediateDirectories: true
-                )
-                try data.write(to: Self.folder.appendingPathComponent("panel-chip-copy.png"))
+        // The row's labels keep the pill's size while the chip covers them,
+        // and the swap disc keeps its glyph: a hover must not shrink a label
+        // or turn it into the lone picker's menu face.
+        for (target, name) in [
+            (SidePanelChipTarget.source, "source"),
+            (.target, "target"),
+            (.swap, "swap"),
+            (.copy, "copy")
+        ] {
+            chip.target = target
+            try await Task.sleep(for: .milliseconds(200))
+            #expect(chip.covers(target), "the chip does not cover \(name)")
+            hosting.layoutSubtreeIfNeeded()
+            if let rep = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+                hosting.cacheDisplay(in: hosting.bounds, to: rep)
+                if let data = rep.representation(using: .png, properties: [:]) {
+                    try FileManager.default.createDirectory(
+                        at: Self.folder,
+                        withIntermediateDirectories: true
+                    )
+                    try data.write(
+                        to: Self.folder.appendingPathComponent("panel-chip-\(name).png")
+                    )
+                }
             }
         }
         window.orderOut(nil)

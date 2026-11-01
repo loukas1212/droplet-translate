@@ -983,18 +983,7 @@ struct ResultWindowView: View {
     }
 
     private var swapGlyph: some View {
-        Image(systemName: "repeat")
-            .font(.system(size: SidePanelContentView.buttonDiameter * 0.4, weight: .bold))
-            .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
-            // Sideways arrows: the languages sit side by side. Each swap turns
-            // the pair half a circle, so the arrows point the other way.
-            .rotationEffect(.degrees(Double(model.swapSpins) * 180))
-            .animation(DroppyAnimation.state, value: model.swapSpins)
-            .frame(
-                width: SidePanelContentView.buttonDiameter,
-                height: SidePanelContentView.buttonDiameter
-            )
-            .opacity(model.canSwap ? 1 : 0.65)
+        PanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
             .chipHidesInk(chip.covers(.swap))
             .allowsHitTesting(false)
     }
@@ -1248,9 +1237,11 @@ struct ResultWindowView: View {
     private func chipInk(for target: SidePanelChipTarget) -> some View {
         switch target {
         case .source:
-            PanelMenuLabel(text: sourceMenuLabel, fontSize: SidePanelContentView.labelFontSize)
+            languageInk(for: sourceMenuLabel)
         case .target:
-            PanelMenuLabel(text: model.name(for: model.targetID), fontSize: SidePanelContentView.labelFontSize)
+            languageInk(for: model.name(for: model.targetID))
+        case .swap:
+            PanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
         case .copy:
             PanelCopyLabel(copied: copied)
         case .more:
@@ -1264,6 +1255,46 @@ struct ResultWindowView: View {
         default:
             EmptyView()
         }
+    }
+
+    /// The language ink the chip draws while it covers a control. The row's
+    /// labels are the shelf's pill labels and keep their size; the lone
+    /// picker inside the result box is the smaller menu label.
+    @ViewBuilder
+    private func languageInk(for text: String) -> some View {
+        if showsLanguageRow {
+            PillLanguageLabel(
+                text: text,
+                highlighted: true,
+                fontSize: SidePanelContentView.bodyFontSize,
+                alignment: .center,
+                edgeInset: Self.rowEdgeInset
+            )
+        } else {
+            PanelMenuLabel(text: text, fontSize: SidePanelContentView.labelFontSize)
+        }
+    }
+}
+
+/// The swap disc's glyph, drawn apart from its glass so the chip can put the
+/// glyph above the chip's own glass.
+private struct PanelSwapGlyph: View {
+    var spins: Int
+    var enabled: Bool
+
+    var body: some View {
+        Image(systemName: "repeat")
+            .font(.system(size: SidePanelContentView.buttonDiameter * 0.4, weight: .bold))
+            .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
+            // Sideways arrows: the languages sit side by side. Each swap turns
+            // the pair half a circle, so the arrows point the other way.
+            .rotationEffect(.degrees(Double(spins) * 180))
+            .animation(DroppyAnimation.state, value: spins)
+            .frame(
+                width: SidePanelContentView.buttonDiameter,
+                height: SidePanelContentView.buttonDiameter
+            )
+            .opacity(enabled ? 1 : 0.65)
     }
 }
 
