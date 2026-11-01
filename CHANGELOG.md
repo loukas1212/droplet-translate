@@ -117,10 +117,10 @@ away again is not in it.
   rounded rectangle, so the background comes out of the button before the rows
   arrive.
   The result alone keeps the shelf's short height as its floor; an original
-  opens the card at the siblings' second step, the language row over the
-  shelf's short input box and its full result box, and the card grows with
-  either up to 600pt, where a longer result scrolls under an original capped
-  at four lines. It is the edge panel's card beside a capture:
+  opens the same card a little taller, the language row over the original's
+  box and the result's, and the card grows with either up to 600pt, where a
+  longer result scrolls under an original capped at four lines. It is the
+  edge panel's card beside a capture:
   the same width, tile radius and type scale, so a result reads the same on
   both. Its boxes carry the edge panel's frosted pane, text margin and soft
   rim fade.

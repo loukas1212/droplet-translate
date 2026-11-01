@@ -650,16 +650,9 @@ struct ResultWindowView: View {
     /// upward in one column, and a shorter card would cut the menu's top row
     /// on its own rim.
     static let minimumHeight: CGFloat = 250
-    /// The card with the original above the result: the siblings' second step,
-    /// the shelf's short box over its full one, under the language row.
-    static var minimumHeightWithOriginal: CGFloat {
-        panelInset * 2 + languageRowHeight + sourceBoxHeight + boxGap
-            + resultBoxHeight + footerHeight
-    }
-    /// The shelf's short input box, which the panel's original takes.
-    static let sourceBoxHeight: CGFloat = SidePanelContentView.minBoxHeight
-    /// The shelf's full result box, which the panel's answer takes.
-    static let resultBoxHeight: CGFloat = SidePanelContentView.resultBoxHeight
+    /// The card with the original above the result. The measured card is
+    /// 273pt; 280 is the nearest round floor.
+    static let minimumHeightWithOriginal: CGFloat = 280
     /// The air between the two boxes, as the shelf's steps space them.
     static let boxGap: CGFloat = DroppySpacing.xsm
     /// The seam the language row cuts for the swap disc: the air under the
@@ -668,11 +661,6 @@ struct ResultWindowView: View {
     static let rowGap: CGFloat = DroppySpacing.xsm
     static let seamFillet: CGFloat = 10
     static let rowEdgeInset: CGFloat = 10
-    /// What the row adds above the original's box: the pill, with the box
-    /// tucked under the disc's lower half.
-    static var languageRowHeight: CGFloat {
-        LanguageMenu.pillRowHeight + rowGap
-    }
     /// The tallest the card grows before its result scrolls.
     static let maximumHeight: CGFloat = 600
     /// The source is context, not the answer: four lines, then it scrolls.
@@ -684,9 +672,7 @@ struct ResultWindowView: View {
     }
 
     /// The height the card needs for this pair, between its floor and its cap.
-    /// With an original the two boxes keep the siblings' step-2 heights instead
-    /// of shrinking to their words; the result takes the room the source
-    /// leaves, and past the cap it scrolls.
+    /// The result gets the room the source leaves; past the cap it scrolls.
     static func cardHeight(
         forWidth width: CGFloat,
         translated: String,
@@ -695,26 +681,18 @@ struct ResultWindowView: View {
     ) -> CGFloat {
         let showsSource = showsOriginal && !source.isEmpty
         let textWidth = max(120, width - panelInset * 2 - PanelTileText.sideInset * 2 - 20)
-        let resultText = textHeight(translated, width: textWidth)
-        guard showsSource else {
-            // Root inset, the tile's language row and padding, the copy row
-            // and the footer. The floor already leaves a few lines of air.
-            let chrome: CGFloat = 160
-            let resultCap = max(0, maximumHeight - chrome)
-            let resultHeight = min(resultText, resultCap)
-            return min(maximumHeight, max(minimumHeight, chrome + resultHeight))
-        }
-        let sourceText = min(textHeight(source, width: textWidth), sourceTextCap)
-        let sourceTile = max(sourceBoxHeight, sourceText + PanelTileText.verticalAir * 2)
-        let room = maximumHeight - panelInset * 2 - languageRowHeight - sourceTile
-            - boxGap - footerHeight
-        let resultTile = max(
-            resultBoxHeight,
-            min(resultText + PanelTileText.verticalAir * 2, room)
-        )
-        let natural = panelInset * 2 + languageRowHeight + sourceTile + boxGap
-            + resultTile + footerHeight
-        return min(maximumHeight, max(minimumHeightWithOriginal, natural))
+        let sourceHeight = showsSource
+            ? min(textHeight(source, width: textWidth), sourceTextCap)
+            : 0
+        // Root inset, the language row or the tiles' own labels, their padding,
+        // the copy row and the footer. The floors already leave a few lines of
+        // air in the result. The row took the place of the labels the boxes
+        // carried before it, so the card keeps the height it was measured at.
+        let chrome: CGFloat = showsSource ? 228 : 160
+        let resultCap = max(0, maximumHeight - chrome - sourceHeight)
+        let resultHeight = min(textHeight(translated, width: textWidth), resultCap)
+        let natural = chrome + sourceHeight + resultHeight
+        return min(maximumHeight, max(minimumHeight(showsOriginal: showsSource), natural))
     }
 
     static func minimumHeight(showsOriginal: Bool) -> CGFloat {
@@ -998,7 +976,6 @@ struct ResultWindowView: View {
     /// cut into its top edge when the row is above it.
     private var sourceTile: some View {
         sourceWords
-            .frame(minHeight: Self.sourceBoxHeight, alignment: .top)
             .background {
                 if showsLanguageRow {
                     FrostedTileSurface(shape: AnyShape(tileShape))
