@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import DroppyKit
 import SwiftUI
@@ -88,8 +89,9 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
 
     /// Translating another app's selection and reading a screen region, both
     /// also shelf buttons. Declared here so Droppy's Shortcuts page can show
-    /// them. The default is nil: the user picks, and the host drops a
-    /// suggestion that collides with an existing binding.
+    /// them. Their default is nil: the user picks, and the host drops a
+    /// suggestion that collides with an existing binding. The panel ships with
+    /// one, because nothing else opens an empty card.
     private func registerShortcuts(host: DropletHost) {
         host.shortcuts.register(
             id: "select-text",
@@ -108,7 +110,10 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
         host.shortcuts.register(
             id: "open-panel",
             title: L10n.tr("settings.shortcuts.panel"),
-            defaultShortcut: nil
+            defaultShortcut: DropletKeyboardShortcut(
+                keyCode: 35,
+                modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue
+            )
         ) { [weak self] in
             guard let self else { return }
             TranslationPanel.shared.showEmpty(model: self.model)
