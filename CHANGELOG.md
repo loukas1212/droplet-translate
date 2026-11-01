@@ -112,9 +112,10 @@ away again is not in it.
   footer, so a card behaves identically wherever it is asked to appear. It
   opens empty from its own shortcut — set in Droppy's Shortcuts page, next to
   the two capture shortcuts — and takes the keyboard in the text field, or
-  opens beside a capture with the result in it. A drag on its handle sizes the
-  card, and a pull on the box folds the original away to give the answer the
-  room, as on the edge panel.
+  opens beside a capture with the result in it. The handle grows the edge
+  panel's lobe out of the card's bottom edge under the pointer, as one outline
+  with the face; a drag on it sizes the card, and a pull on the box folds the
+  original away to give the answer the room, as on the edge panel.
 - The floating panel wears the same themed surface and the same footer as the
   other surfaces: the more disc on the leading edge, and the Translate wordmark
   with its engine on the trailing edge. The footer keeps the same 6pt rim above

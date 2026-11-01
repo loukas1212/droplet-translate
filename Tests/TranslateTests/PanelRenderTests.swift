@@ -374,11 +374,10 @@ struct PanelRenderTests {
 
     @Test("The panel spring follows the same path at every refresh rate")
     func panelSpringIsRefreshRateIndependent() {
-        let panel = SidePanel.shared
         let spring = (response: 0.42, damping: 0.65)
-        let whole = panel.springStep(0, velocity: 0, to: 1, spring: spring, dt: 1.0 / 30)
-        let half = panel.springStep(0, velocity: 0, to: 1, spring: spring, dt: 1.0 / 60)
-        let twoHalves = panel.springStep(
+        let whole = SidePanel.springStep(0, velocity: 0, to: 1, spring: spring, dt: 1.0 / 30)
+        let half = SidePanel.springStep(0, velocity: 0, to: 1, spring: spring, dt: 1.0 / 60)
+        let twoHalves = SidePanel.springStep(
             half.value,
             velocity: half.velocity,
             to: 1,
@@ -840,6 +839,41 @@ struct PanelRenderTests {
         // The top air is the band's full height, so the first line never sits
         // under the fade.
         #expect(PanelTileText.verticalAir == PanelTileText.fadeBand(for: 420))
+    }
+
+    @Test("The floating card grows the edge panel's lobe out of its face")
+    func floatingCardGrowsItsLobe() {
+        let body = SidePanelContentView.panelMinBodyHeight
+        let strip = SidePanelContentView.pillStrip
+        let rect = CGRect(
+            x: 0,
+            y: 0,
+            width: SidePanel.expandedWidth,
+            height: body + strip
+        )
+        let rest = FloatingCardShape(strip: strip, gripAmount: 0).path(in: rect)
+        let out = FloatingCardShape(strip: strip, gripAmount: 1).path(in: rect)
+        let inside = FloatingCardShape(strip: strip, gripAmount: 0.01).path(in: rect)
+
+        #expect(abs(rest.boundingRect.maxY - body) < 0.01, "the card's face moved")
+        #expect(abs(rest.boundingRect.width - rect.width) < 0.01)
+        #expect(
+            abs(out.boundingRect.maxY - (body + 17)) < 0.01,
+            "the lobe does not hang below the face"
+        )
+        #expect(
+            abs(out.boundingRect.midX - rect.midX) < 0.01,
+            "the lobe is not centred on the card"
+        )
+        #expect(
+            inside.boundingRect.maxY <= body,
+            "the lobe peeks out before the pointer brings it out"
+        )
+        var subpaths = 0
+        out.cgPath.applyWithBlock { element in
+            if element.pointee.type == .moveToPoint { subpaths += 1 }
+        }
+        #expect(subpaths == 1, "the lobe is a second subpath, so its edge draws across the card")
     }
 
     @Test("The panels' standard card heights are round numbers")

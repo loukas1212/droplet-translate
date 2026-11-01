@@ -1065,7 +1065,7 @@ final class SidePanel: NSPanel {
         }
         // The lobe's amount moves the card's own outline, so the glass keeps
         // one shape and one colour while the handle comes out.
-        let gripStep = springStep(
+        let gripStep = Self.springStep(
             gripAmount,
             velocity: gripVelocity,
             to: gripTarget,
@@ -1106,9 +1106,26 @@ final class SidePanel: NSPanel {
         if revealTarget == 0 { finishFold() }
     }
 
+    /// One frame of the grip's critically damped spring, shared with the
+    /// floating panel so its lobe leaves the card on the same beat.
+    static func gripStep(
+        _ value: CGFloat,
+        velocity: CGFloat,
+        to target: CGFloat,
+        dt: CFTimeInterval
+    ) -> (value: CGFloat, velocity: CGFloat) {
+        springStep(
+            value,
+            velocity: velocity,
+            to: target,
+            spring: gripSpring,
+            dt: dt
+        )
+    }
+
     /// One frame of a damped spring, solved analytically so its path does not
     /// depend on the display's refresh rate. Velocity survives a mid-flight retarget.
-    func springStep(
+    static func springStep(
         _ value: CGFloat,
         velocity: CGFloat,
         to target: CGFloat,
@@ -1708,13 +1725,22 @@ struct SidePanelUnifiedShape: Shape {
     /// inside the card, so the card's own outline is all that shows; the
     /// pointer brings it out.
     static func lobe(in card: CGRect, amount: CGFloat) -> Path? {
+        lobe(
+            centreX: card.midX,
+            flatBottom: card.maxY - SidePanelCardShape.filletRadius,
+            amount: amount
+        )
+    }
+
+    /// The same lobe under any card whose bottom edge is straight at
+    /// `flatBottom`, so the floating card grows the edge panel's handle.
+    static func lobe(centreX: CGFloat, flatBottom: CGFloat, amount: CGFloat) -> Path? {
         guard amount > 0.001 else { return nil }
-        let flatBottom = card.maxY - SidePanelCardShape.filletRadius
         let out = SidePanelContentView.gripCurveDepth - SidePanelContentView.gripOverlap
         let bottom = flatBottom + out - SidePanelContentView.gripRise * (1 - amount)
         return SidePanelGripShape(stem: SidePanelContentView.gripTuck).path(
             in: CGRect(
-                x: card.midX - SidePanelContentView.gripWidth / 2,
+                x: centreX - SidePanelContentView.gripWidth / 2,
                 y: bottom - SidePanelContentView.gripDepth,
                 width: SidePanelContentView.gripWidth,
                 height: SidePanelContentView.gripDepth
