@@ -872,9 +872,13 @@ struct ResultWindowView: View {
         showsOriginal && !source.isEmpty
     }
 
-    /// The shelf's language row, at the panel's own width.
+    /// The shelf's language row: the siblings' short centered pill, not the
+    /// card's whole width, so the labels sit as close together as theirs.
     private var languageRow: some View {
-        let rowWidth = SidePanel.expandedWidth - panelInset * 2
+        let rowWidth = min(
+            SidePanelContentView.defaultRowWidth,
+            SidePanel.expandedWidth - panelInset * 2
+        )
         let halfWidth = (rowWidth - SidePanelContentView.discRadius * 2) / 2
         let button = SidePanelContentView.buttonDiameter
         let capsule = AnyShape(Capsule(style: .continuous))
@@ -954,6 +958,8 @@ struct ResultWindowView: View {
             height: LanguageMenu.pillRowHeight + SidePanelContentView.discRadius,
             alignment: .topLeading
         )
+        // Centered over the boxes, as both siblings draw it.
+        .frame(maxWidth: .infinity)
     }
 
     private var swapButton: some View {
