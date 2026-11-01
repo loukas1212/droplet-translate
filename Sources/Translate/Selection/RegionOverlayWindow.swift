@@ -77,6 +77,13 @@ private struct RegionPickerView: View {
     }
 }
 
+/// Droppy runs in the background, so the first press on a window it opens is
+/// usually the one that activates the app. Without this, that press only
+/// brings Droppy forward and the drag that should start the selection is lost.
+private final class RegionPickerHostingView: NSHostingView<RegionPickerView> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 @MainActor
 final class RegionOverlayWindow: NSWindow {
     private static weak var activeWindow: RegionOverlayWindow?
@@ -157,7 +164,7 @@ final class RegionOverlayWindow: NSWindow {
                 resume(rect)
             }
 
-            window.contentView = NSHostingView(rootView: RegionPickerView(
+            window.contentView = RegionPickerHostingView(rootView: RegionPickerView(
                 onComplete: { [weak window] rect in
                     guard let window else { resume(nil); return }
                     window.finish(rect: rect)
