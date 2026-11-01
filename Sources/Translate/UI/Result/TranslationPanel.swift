@@ -20,6 +20,9 @@ final class TranslationPanel: NSPanel {
     private var keyTask: Task<Void, Never>?
     private var interactive = false
     private var pinned = false
+    /// Whether the model's own card is the face on screen. A live card follows
+    /// the model, so a result must not build a second one.
+    private var wearsCard = false
     /// The content's own controls: the sliding chip, the handle's amount and
     /// the card's pin. They live here so the panel can resize without losing
     /// them, exactly as the edge panel keeps them on its window.
@@ -70,7 +73,9 @@ final class TranslationPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
-        isMovableByWindowBackground = true
+        // The handle is this card's drag surface. A background move carries
+        // the card up with an upward pull, so the grip never sees the reverse.
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -107,6 +112,13 @@ final class TranslationPanel: NSPanel {
     // throws when asked to make a borderless window main.
     override var canBecomeMain: Bool { true }
 
+    /// The card is up and staying: the panel is on screen, wearing the model's
+    /// own card, and not folding away. Rebuilding that face would drop a grip
+    /// that is still held and move the card's top.
+    private var keepsLiveCard: Bool {
+        isVisible && wearsCard && !bloomClosing
+    }
+
     // MARK: - Entry points
 
     /// The actions the more menu offers. The droplet owns capture and
@@ -134,6 +146,12 @@ final class TranslationPanel: NSPanel {
     ) {
         interactive = true
         focusesEditor = false
+        // The card watches the model it was opened with, so a result that
+        // lands while it is up needs no new face.
+        if keepsLiveCard {
+            if !pinned { installMonitor() }
+            return
+        }
         bodyHeight = SidePanelContentView.bodyHeight(
             forBox: SidePanelContentView.panelBoxFloor,
             result: true
@@ -146,6 +164,7 @@ final class TranslationPanel: NSPanel {
             near: rect,
             on: screen
         )
+        wearsCard = true
         if !pinned { installMonitor() }
     }
 
@@ -160,6 +179,11 @@ final class TranslationPanel: NSPanel {
         focusesEditor = true
         pinned = false
         pin.isPinned = false
+        if keepsLiveCard {
+            takeEditorFocus()
+            installMonitor()
+            return
+        }
         bodyHeight = SidePanelContentView.panelMinBodyHeight
         display(
             content: floatingContent(model: model),
@@ -169,6 +193,7 @@ final class TranslationPanel: NSPanel {
             near: rect,
             on: screen
         )
+        wearsCard = true
         installMonitor()
     }
 
@@ -183,6 +208,9 @@ final class TranslationPanel: NSPanel {
     ) {
         interactive = true
         focusesEditor = false
+        // The card draws the same status, with the same download and retry
+        // controls as the edge panel. A live card keeps its face.
+        if keepsLiveCard { return }
         pinned = false
         display(
             content: AnyView(ResultWindowStatusView(
@@ -199,6 +227,7 @@ final class TranslationPanel: NSPanel {
             near: rect,
             on: screen
         )
+        wearsCard = false
         installMonitor()
     }
 
@@ -226,6 +255,7 @@ final class TranslationPanel: NSPanel {
     private func finishClosing() {
         stopBloom()
         stopGripMotion()
+        wearsCard = false
         if activation != nil {
             activation?.finish()
             activation = nil
@@ -334,13 +364,31 @@ final class TranslationPanel: NSPanel {
         guard isVisible else { return }
         // A box that grows while the card is still opening must take the card
         // with it: the bloom has to end on the size the content asked for, or
-        // the footer is left hanging under the card's edge.
-        var target = bloomCard == .zero ? frame : bloomCard
-        target.size.height = Self.windowHeight(forBody: clamped)
-        target.origin.y = target.maxY - target.height
+        // the footer is left hanging under the card's edge. During the bloom
+        // only the target frame has the final top.
+        let resting = bloomLink == nil ? frame : bloomCard
+        let target = Self.frameKeepingTop(
+            resting,
+            size: CGSize(
+                width: resting.width,
+                height: Self.windowHeight(forBody: clamped)
+            )
+        )
         bloomCard = target
         guard bloomLink == nil else { return }
         place(bloom: target)
+    }
+
+    /// The window of `size` that keeps the top edge `frame` has now. The card
+    /// grows and folds from its top, as the edge panel's does, so the line the
+    /// user is reading never slides under the pointer.
+    static func frameKeepingTop(_ frame: NSRect, size: CGSize) -> NSRect {
+        NSRect(
+            x: frame.minX,
+            y: frame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
     }
 
     // MARK: - Display
@@ -425,10 +473,10 @@ final class TranslationPanel: NSPanel {
         // The panel stays where the user put it after the first presentation.
         let windowFrame: NSRect
         if isVisible {
-            let origin = frame.origin
-            var kept = NSRect(origin: origin, size: CGSize(width: width, height: panelHeight))
-            kept.origin.y = origin.y - (panelHeight - frame.height)
-            windowFrame = kept
+            windowFrame = Self.frameKeepingTop(
+                frame,
+                size: CGSize(width: width, height: panelHeight)
+            )
         } else {
             windowFrame = Self.frameForPanel(
                 size: CGSize(width: width, height: panelHeight),

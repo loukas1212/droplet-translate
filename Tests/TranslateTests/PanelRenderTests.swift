@@ -1787,6 +1787,29 @@ struct PanelRenderTests {
         #expect(TranslationPanel.shared.canBecomeMain)
     }
 
+    /// An upward pull belongs to the grip. If AppKit moves the window with the
+    /// pointer instead, the card travels but never folds back.
+    @Test("The floating panel leaves the grip's drag to its handle")
+    func floatingPanelDoesNotMoveByBackground() {
+        #expect(!TranslationPanel.shared.isMovableByWindowBackground)
+    }
+
+    /// The grip moves the card's bottom edge, as on the edge panel. A resize
+    /// that kept the bottom would slide the words under the pointer.
+    @Test("The floating panel keeps its top when its body resizes")
+    func floatingPanelKeepsItsTop() {
+        let frame = NSRect(x: 120, y: 300, width: 460, height: 360)
+        for height in [250, 360, 610] as [CGFloat] {
+            let resized = TranslationPanel.frameKeepingTop(
+                frame,
+                size: CGSize(width: 460, height: height)
+            )
+            #expect(resized.maxY == frame.maxY)
+            #expect(resized.minX == frame.minX)
+            #expect(resized.height == height)
+        }
+    }
+
     @Test("The floating panel grows with its result, up to its cap")
     func floatingPanelCardHeights() {
         let width = SidePanel.expandedWidth

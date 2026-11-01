@@ -870,8 +870,10 @@ final class TranslateModel: ObservableObject {
         status = .translating
         outputScrollResetToken = UUID()
         // The panel is for a finished result, not progress: close the old one
-        // instead of replacing it with a spinner.
-        if resultDisplay == .panel {
+        // instead of replacing it with a spinner. An empty card keeps its
+        // face: the grip that starts the translation is on it, and folding
+        // the card away would drop the drag.
+        if resultDisplay == .panel, !output.isEmpty {
             TranslationPanel.shared.closePanel()
         }
         let target = resolvedTarget
