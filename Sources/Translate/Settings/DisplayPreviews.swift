@@ -153,9 +153,11 @@ struct FloatingSurfacePreview: View {
     @State private var pin = SidePanelPinState()
 
     static let bodyHeight = SidePanelContentView.panelMinBodyHeight
+    /// The panel's window: the body plus the strip the handle hangs in, as the
+    /// shortcut opens it.
     static let cardSize = CGSize(
         width: SidePanel.expandedWidth,
-        height: bodyHeight
+        height: bodyHeight + SidePanelContentView.pillStrip
     )
 
     var body: some View {

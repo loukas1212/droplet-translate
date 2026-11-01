@@ -130,7 +130,7 @@ final class TranslationPanel: NSPanel {
         display(
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
-            height: bodyHeight,
+            height: Self.windowHeight(forBody: bodyHeight),
             near: rect,
             on: screen
         )
@@ -151,7 +151,7 @@ final class TranslationPanel: NSPanel {
         display(
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
-            height: bodyHeight,
+            height: Self.windowHeight(forBody: bodyHeight),
             near: rect,
             on: screen
         )
@@ -295,6 +295,14 @@ final class TranslationPanel: NSPanel {
         )
     }
 
+    /// The window that holds a card body of `body`. The body already counts the
+    /// content's inset on every edge; the extra 44pt is the strip the handle
+    /// hangs in, the strip the edge panel keeps below its face. Without it the
+    /// footer and the handle are squeezed out of the card.
+    private static func windowHeight(forBody body: CGFloat) -> CGFloat {
+        body + SidePanelContentView.pillStrip
+    }
+
     /// The content owns the card's height: it reports what the box and the
     /// result need, and the window follows, keeping its top edge so the line
     /// being typed stays where the eye left it.
@@ -307,8 +315,8 @@ final class TranslationPanel: NSPanel {
         bodyHeight = clamped
         guard isVisible, bloomLink == nil else { return }
         var target = frame
-        target.size.height = clamped
-        target.origin.y = frame.maxY - clamped
+        target.size.height = Self.windowHeight(forBody: clamped)
+        target.origin.y = frame.maxY - target.height
         bloomCard = target
         place(bloom: target)
     }
@@ -638,8 +646,9 @@ struct FloatingPanelBody: View {
             requestSelection: requestSelection,
             cancelSelection: cancelSelection,
             boxFloor: SidePanelContentView.panelBoxFloor,
-            keepsGripInsideCard: true,
-            onGripOut: { out in grip.amount = out ? 1 : 0 },
+            onGripOut: { out in
+                withAnimation(DroppyAnimation.hover) { grip.amount = out ? 1 : 0 }
+            },
             onPin: onPin,
             onBodyHeight: onBodyHeight
         )
