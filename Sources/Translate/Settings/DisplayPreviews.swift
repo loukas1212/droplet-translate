@@ -163,12 +163,18 @@ struct FloatingSurfacePreview: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             // The sheet under the glass: the settings page is not the desktop,
-            // and glass over the page comes out grey.
-            RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                .fill(.black)
-            SidePanelCardSurface(
-                shape: AnyShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
-            )
+            // and glass over the page comes out grey. It stops at the card's
+            // face; the strip below belongs to the handle.
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+                    .fill(.black)
+                SidePanelCardSurface(
+                    shape: AnyShape(
+                        RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
+                    )
+                )
+            }
+            .frame(width: Self.cardSize.width, height: Self.bodyHeight)
             FloatingPanelBody(
                 model: PreviewSample.widgetModel(model, showsResult: false),
                 chip: chip,

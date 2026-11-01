@@ -135,6 +135,7 @@ final class TranslationPanel: NSPanel {
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
             height: Self.windowHeight(forBody: bodyHeight),
+            gripStrip: SidePanelContentView.pillStrip,
             near: rect,
             on: screen
         )
@@ -157,6 +158,7 @@ final class TranslationPanel: NSPanel {
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
             height: Self.windowHeight(forBody: bodyHeight),
+            gripStrip: SidePanelContentView.pillStrip,
             near: rect,
             on: screen
         )
@@ -338,6 +340,7 @@ final class TranslationPanel: NSPanel {
         width: CGFloat,
         height: CGFloat?,
         minimumHeight: CGFloat = 140,
+        gripStrip: CGFloat = 0,
         near rect: CGRect?,
         on screen: NSScreen?
     ) {
@@ -362,7 +365,7 @@ final class TranslationPanel: NSPanel {
         // The card's surface sits in its own layer, as it does under the edge
         // panel's content, so the bloom scales it with the boxes and the tiles
         // sit on the themed glass instead of on the window's black.
-        let surface = NSHostingView(rootView: PanelSurfaceLayer())
+        let surface = NSHostingView(rootView: PanelSurfaceLayer(gripStrip: gripStrip))
         surface.appearance = NSAppearance(named: .darkAqua)
         surface.autoresizingMask = [.width, .height]
         surface.frame = hosting.bounds
@@ -741,12 +744,18 @@ private struct PanelSurfaceBackdrop: View {
 /// same way the edge panel's `SidePanelGlassHost` does, so the card is one
 /// layer under the boxes.
 private struct PanelSurfaceLayer: View {
+    /// The strip under the face where the handle sits. The glass stops at the
+    /// face, so the handle hangs below the card as it does on the edge panel
+    /// instead of sitting in a band of its own.
+    var gripStrip: CGFloat = 0
+
     var body: some View {
         SidePanelCardSurface(
             shape: AnyShape(
                 RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
             )
         )
+        .padding(.bottom, gripStrip)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
