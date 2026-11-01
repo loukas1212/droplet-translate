@@ -10,6 +10,7 @@ final class KnobOnlyScroller: NSScroller {
 
     private var fadeTask: Task<Void, Never>?
     private var isDragging = false
+    private var isAwake = false
     private var hoverArea: NSTrackingArea?
 
     /// Checked on demand: a remembered "hovering" flag goes stale when the
@@ -36,6 +37,7 @@ final class KnobOnlyScroller: NSScroller {
             selector: #selector(contentScrolled),
             name: NSView.boundsDidChangeNotification,
             object: clip)
+        isAwake = false
         alphaValue = idleAlpha
     }
 
@@ -82,7 +84,12 @@ final class KnobOnlyScroller: NSScroller {
 
     private func wake() {
         fadeTask?.cancel()
-        setAlpha(1)
+        // A live scroll wakes the knob on every frame; animating from 1 to 1
+        // that often stacks animations and makes the knob flicker.
+        if !isAwake {
+            isAwake = true
+            setAlpha(1)
+        }
         scheduleFade()
     }
 
@@ -96,6 +103,7 @@ final class KnobOnlyScroller: NSScroller {
                 try? await Task.sleep(for: fadeDelay)
                 guard !Task.isCancelled, let self else { return }
                 if !self.isPointerInside && !self.isDragging {
+                    self.isAwake = false
                     self.setAlpha(self.idleAlpha)
                     return
                 }
@@ -111,6 +119,17 @@ final class KnobOnlyScroller: NSScroller {
     }
 }
 
+/// Keeps a text view from scrolling sideways. The text wraps by character, so
+/// a wide document is always a layout mistake, and a horizontal offset makes
+/// the words jump when the viewport is resized.
+final class VerticalOnlyClipView: NSClipView {
+    override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
+        var bounds = super.constrainBoundsRect(proposedBounds)
+        bounds.origin.x = 0
+        return bounds
+    }
+}
+
 /// Shortens the vertical scroller at the top and bottom so the knob stops
 /// before overlay buttons. The text area itself is untouched.
 final class InsetScrollView: NSScrollView {
@@ -120,6 +139,9 @@ final class InsetScrollView: NSScrollView {
     var scrollerBottomInset: CGFloat = 0 {
         didSet { if oldValue != scrollerBottomInset { tile() } }
     }
+    /// False when a host owns the knob's visibility; the shared output views
+    /// let the scroll view show it only while there is overflow.
+    var managesKnobVisibility = true
 
     override func tile() {
         super.tile()
@@ -160,9 +182,23 @@ final class InsetScrollView: NSScrollView {
         if abs(textView.frame.height - documentHeight) > 0.5 {
             textView.setFrameSize(NSSize(width: width, height: documentHeight))
         }
-        if contentView.bounds.origin.x != 0 {
-            contentView.scroll(to: NSPoint(x: 0, y: contentView.bounds.origin.y))
-            reflectScrolledClipView(contentView)
+        // The knob is there only when there is something to reach. A knob on
+        // text that fits invites a scroll that only rubber-bands and snaps
+        // back, which reads as the box shaking.
+        guard managesKnobVisibility else { return }
+        let overflows = textHeight > contentSize.height + 0.5
+        if hasVerticalScroller != overflows {
+            // Showing the knob narrows the content, and AppKit keeps a small
+            // scroll offset from the old width. A box at its top must stay
+            // there, or the first line is cut the moment the box opens.
+            let staysAtTop = contentView.bounds.origin.y <= 0.5
+            hasVerticalScroller = overflows
+            if staysAtTop, contentView.bounds.origin.y != 0 {
+                contentView.scroll(to: .zero)
+            }
+        }
+        if !overflows, contentView.bounds.origin.y != 0 {
+            contentView.scroll(to: .zero)
         }
     }
 }
@@ -194,6 +230,8 @@ struct KnobScrollView<Content: View>: NSViewRepresentable {
         let scrollView = InsetScrollView()
         scrollView.scrollerTopInset = scrollerTopInset
         scrollView.scrollerBottomInset = scrollerBottomInset
+        scrollView.managesKnobVisibility = false
+        scrollView.contentView = VerticalOnlyClipView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.verticalScroller = KnobOnlyScroller()
@@ -267,10 +305,11 @@ struct TranslationOutputScrollView: NSViewRepresentable {
         let scrollView = InsetScrollView()
         scrollView.scrollerTopInset = scrollerTopInset
         scrollView.scrollerBottomInset = scrollerBottomInset
+        scrollView.contentView = VerticalOnlyClipView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.verticalScroller = KnobOnlyScroller()
-        scrollView.hasVerticalScroller = true
+        scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = false
         scrollView.verticalScrollElasticity = .allowed
@@ -305,7 +344,6 @@ struct TranslationOutputScrollView: NSViewRepresentable {
         context.coordinator.lastText = text
         context.coordinator.lastResetToken = resetToken
         scrollView.documentView = textView
-        scrollView.contentView.postsBoundsChangedNotifications = true
         return scrollView
     }
 
