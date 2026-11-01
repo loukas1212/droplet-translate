@@ -322,11 +322,15 @@ final class TranslationPanel: NSPanel {
         )
         guard abs(clamped - bodyHeight) > 0.5 else { return }
         bodyHeight = clamped
-        guard isVisible, bloomLink == nil else { return }
-        var target = frame
+        guard isVisible else { return }
+        // A box that grows while the card is still opening must take the card
+        // with it: the bloom has to end on the size the content asked for, or
+        // the footer is left hanging under the card's edge.
+        var target = bloomCard == .zero ? frame : bloomCard
         target.size.height = Self.windowHeight(forBody: clamped)
-        target.origin.y = frame.maxY - target.height
+        target.origin.y = target.maxY - target.height
         bloomCard = target
+        guard bloomLink == nil else { return }
         place(bloom: target)
     }
 
