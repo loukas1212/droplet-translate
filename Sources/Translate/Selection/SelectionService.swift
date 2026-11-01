@@ -611,11 +611,13 @@ final class SelectionService {
     }
 
     private func watchForEscape(requestID: UUID) {
+        stopEscapeMonitor() // Clear any existing monitor first
         escapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.interactionID == requestID else { return }
                 self.host?.log.info("Select: cancelled with Escape")
+                self.stopEscapeMonitor()
                 self.cancel()
             }
         }
