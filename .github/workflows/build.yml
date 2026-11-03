@@ -1,0 +1,33 @@
+name: Build
+
+on: 
+  push:
+    branches: ['**']
+    tags-ignore: ['v*']
+  pull_request:
+  workflow_call: # Other worflow can call this
+
+jobs:
+  build:
+    runs-on: xcode-27
+    
+
+    steps:
+      - uses: actions/checkout@v4
+        with: 
+          fetch-depth: 0
+
+      - name: Download droppy SDK
+        run: git clone https://gitlab.com/droppyformac1/droppykit.git
+
+      - name: Install DroppyKit SDK
+        run: |
+          echo "$GITHUB_WORKSPACE/droppykit/Scripts" >> "$GITHUB_PATH"
+          droppykit version
+
+      - name: Build the droplet
+        run: droppykit build
+
+      
+
+      
