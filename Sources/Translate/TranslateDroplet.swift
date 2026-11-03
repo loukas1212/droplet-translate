@@ -17,9 +17,13 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
     private let capture = CaptureService()
     private let selection = SelectionService()
     private var host: DropletHost?
-    /// The shelf card's current step; the capsule moves it and the descriptor
-    /// reports it to the host.
-    private var shelfHeightStep: ShelfHeightStep = .compact
+    /// The card height the shelf content asks for. The descriptor reports it,
+    /// and the host springs to it after an invalidation.
+    private var shelfCardHeight = SidePanelContentView.shelfOpeningCardHeight
+    /// The last height the host was told about. Small changes wait until they
+    /// cross the threshold, so typing does not invalidate on every keystroke.
+    private var lastShelfLayoutHeight = SidePanelContentView.shelfOpeningCardHeight
+    private static let shelfLayoutThreshold: CGFloat = 8
     /// Watches the chosen destination, so the edge panel comes and goes with it.
     private var displayCancellable: AnyCancellable?
     /// Moves the edge panel when its side changes.
@@ -40,24 +44,19 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
             cancelSelection: { [weak self] in self?.selection.cancel() }
         )
         registerShortcuts(host: host)
-        // The edge panel is the droplet's own card, and it is only there when
-        // it is the chosen place for the result: a card the user did not ask
-        // for would sit on the screen for nothing.
         displayCancellable = model.$resultDisplay.sink { [weak self] display in
-            // `Published` publishes in `willSet`, so the value it carries is
-            // the new one and the model still holds the old. The panel must
-            // move before the result is sent to it.
             MainActor.assumeIsolated { self?.updateSidePanel(display) }
         }
         sidePanelCancellable = model.$sidePanelSide.sink { side in
             MainActor.assumeIsolated { SidePanel.shared.setSide(side) }
         }
-        updateSidePanel()
+        updateSidePanel(model.resultDisplay)
     }
 
-    /// The edge panel follows the chosen destination.
-    private func updateSidePanel(_ display: ResultDisplay? = nil) {
-        guard (display ?? model.resultDisplay) == .sidePanel else {
+    /// The edge panel exists only while it is the chosen Display mode; every
+    /// other mode keeps its tab off the screen.
+    private func updateSidePanel(_ display: ResultDisplay) {
+        guard display == .sidePanel else {
             SidePanel.shared.hide()
             return
         }
@@ -83,15 +82,14 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
         // the moment the droplet is off.
         host?.shortcuts.unregister(id: "select-text")
         host?.shortcuts.unregister(id: "capture-region")
-        host?.shortcuts.unregister(id: "open-panel")
+        host?.shortcuts.unregister(id: "open-translate")
         host = nil
     }
 
-    /// Translating another app's selection and reading a screen region, both
-    /// also shelf buttons. Declared here so Droppy's Shortcuts page can show
-    /// them. Their default is nil: the user picks, and the host drops a
-    /// suggestion that collides with an existing binding. The panel ships with
-    /// one, because nothing else opens an empty card.
+    /// The three ways to start a translation without the shelf, all also shelf
+    /// buttons. Declared here so Droppy's Shortcuts page can show them. Every
+    /// default is nil: the user picks, and the host drops a suggestion that
+    /// collides with an existing binding.
     private func registerShortcuts(host: DropletHost) {
         host.shortcuts.register(
             id: "select-text",
@@ -108,15 +106,11 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
             self?.capture.requestRegion()
         }
         host.shortcuts.register(
-            id: "open-panel",
-            title: L10n.tr("settings.shortcuts.panel"),
-            defaultShortcut: DropletKeyboardShortcut(
-                keyCode: 35,
-                modifiers: NSEvent.ModifierFlags([.control, .option]).rawValue
-            )
+            id: "open-translate",
+            title: L10n.tr("settings.shortcuts.open"),
+            defaultShortcut: nil
         ) { [weak self] in
-            guard let self else { return }
-            TranslationPanel.shared.showEmpty(model: self.model)
+            self?.model.openTranslate()
         }
     }
 }
@@ -131,10 +125,11 @@ extension TranslateDroplet: ShelfWidgetProviding {
                 title: "Translate",
                 systemImage: "translate",
                 layoutTraits: ShelfWidgetLayoutTraits(
-                    preferredSoloWidth: 440,
+                    preferredSoloWidth: SidePanelContentView.shelfSoloWidth,
                     preferredPairedWidth: 230,
-                    // The capsule's step; the host springs to the new height.
-                    contentHeight: .fixed(shelfHeightStep.height)
+                    // The content's own height; the widget reports it as the
+                    // input and the fitted result grow.
+                    contentHeight: .fixed(shelfCardHeight)
                 ),
                 // The primary surface is a text field.
                 focusPolicy: .keyboardFocusable,
@@ -146,7 +141,16 @@ extension TranslateDroplet: ShelfWidgetProviding {
     public func makeWidgetView(_ id: ShelfWidgetID, context: ShelfWidgetContext) -> AnyView {
         model.updateShelfPreviewShape(from: context)
         let insets = context.contentInsets
-        let width = context.availableSize.width - insets.leading - insets.trailing
+        // The host gives a notch card 8pt at its sides and a solo island card
+        // none; the widget keeps the 8 itself, so both draw the same boxes.
+        let side = max(insets.leading, insets.trailing, SidePanelContentView.shelfBoxInset)
+        let edges = EdgeInsets(
+            top: insets.top,
+            leading: side,
+            bottom: insets.bottom,
+            trailing: side
+        )
+        let width = context.availableSize.width - side * 2
         return AnyView(
             TranslateWidget(
                 model: model,
@@ -156,20 +160,22 @@ extension TranslateDroplet: ShelfWidgetProviding {
                 rowWidth: width > 0
                     ? min(SidePanelContentView.defaultRowWidth, width)
                     : SidePanelContentView.defaultRowWidth,
-                shelfStep: shelfHeightStep,
-                hostInset: insets.top + insets.bottom,
-                onShelfStep: { [weak self] step in self?.setShelfStep(step) }
+                shelfHeightBudget: insets.top + insets.bottom,
+                onShelfHeight: { [weak self] height in self?.setShelfHeight(height) }
             )
-            .padding(context.contentInsets)
+            .padding(edges)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         )
     }
 
-    /// A step tap: ask the host for that card height. The shelf re-reads the
-    /// descriptor and springs to it; the droplet never resizes the card itself.
-    private func setShelfStep(_ step: ShelfHeightStep) {
-        guard shelfHeightStep != step else { return }
-        shelfHeightStep = step
+    /// The content's needed card height. The host re-reads the descriptor and
+    /// springs to it, but only once the change is worth a resize.
+    private func setShelfHeight(_ height: CGFloat) {
+        let range = DroppyShellMetrics.shelfWidgetFixedContentHeightRange
+        let clamped = min(max(height, range.lowerBound), range.upperBound)
+        shelfCardHeight = clamped
+        guard abs(clamped - lastShelfLayoutHeight) >= Self.shelfLayoutThreshold else { return }
+        lastShelfLayoutHeight = clamped
         host?.shelf.invalidateLayout(for: "translate")
     }
 

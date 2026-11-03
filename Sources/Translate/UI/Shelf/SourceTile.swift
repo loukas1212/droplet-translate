@@ -260,9 +260,6 @@ struct SourceTile: View {
     var notch: SeamNotchShape.Edge? = .bottom
     /// The edge panel lifts the language into a header above the tile.
     var showsLanguageMenu = true
-    /// The edge panel and the shelf draw this surface as a frosted pane; the
-    /// default keeps the flat raised fill for a mount that wants it.
-    var glassTile = false
     /// The edge panel asks for its own tile radius; the shelf keeps the shared one.
     var tileCornerRadius: CGFloat?
     /// The edge panel trims the empty top of the box; the shelf keeps 44.
@@ -288,8 +285,8 @@ struct SourceTile: View {
     var hoverChrome = false
     /// The control the edge panel's chip marks this box as.
     var chipTarget: SidePanelChipTarget?
-    /// The edge panel's swap pocket, cut through the tile's glass so the card
-    /// shows instead of a fill.
+    /// The edge panel's swap pocket, so the chip's hover wash leaves the disc
+    /// clear.
     var pocketCut: SidePanelBoxCut?
 
     @State private var hovering = false
@@ -360,12 +357,6 @@ struct SourceTile: View {
             cornerRadius: tileCornerRadius ?? TileMetrics.cornerRadius,
             pocket: pocketCut
         )
-        .tile(
-            notch: notch,
-            glass: glassTile,
-            cornerRadius: tileCornerRadius,
-            pocket: pocketCut
-        )
         .chipTarget(chipTarget)
         .overlay(alignment: .bottomLeading) {
             if showsInlineTools {
@@ -374,16 +365,9 @@ struct SourceTile: View {
                         model.pasteInput()
                     }
                     .disabled(!model.canPaste)
-                    if !(model.input.isEmpty && model.output.isEmpty) {
-                        TileIconButton(symbol: "trash", a11yKey: "a11y.clear", diameter: 24) {
-                            model.clearInput()
-                        }
-                        .transition(.opacity)
-                    }
                     Spacer(minLength: DroppySpacing.sm)
                 }
                 .frame(height: 24, alignment: .bottom)
-                .animation(DroppyAnimation.state, value: [model.input.isEmpty, model.output.isEmpty])
                 .padding(.leading, DroppySpacing.sm)
                 .padding(.bottom, DroppySpacing.sm)
             }
@@ -418,7 +402,6 @@ struct SourceTile: View {
         }
         .font(.system(size: 12, weight: .semibold))
         .buttonStyle(DroppyGlassButtonStyle(shape: AnyShape(Capsule())))
-        .modifier(HoverGrowStyle())
         .arrowCursorRegion()
         .a11y("a11y.translate")
     }

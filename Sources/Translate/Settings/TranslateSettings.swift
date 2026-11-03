@@ -13,7 +13,7 @@ enum TranslateSettingsPage: String, CaseIterable {
         case .translation: return "translate"
         case .display: return "macwindow"
         case .permissions: return "lock.shield"
-        case .help: return "questionmark.circle"
+        case .help: return "book.closed"
         }
     }
 }
@@ -217,8 +217,10 @@ struct TranslateTranslationSettings: View {
 
     /// A link, not a button: a small reversible reset should not shout.
     private var resetLink: some View {
-        Button(L10n.tr("settings.reset")) {
+        Button {
             model.resetTranslationSettings()
+        } label: {
+            Text(L10n.tr("settings.reset"))
         }
         .buttonStyle(.link)
         .font(.callout)
@@ -355,6 +357,7 @@ struct TranslateTranslationSettings: View {
                     isKeyVisible.toggle()
                 } label: {
                     Image(systemName: isKeyVisible ? "eye.slash" : "eye")
+                        .frame(width: 24, height: 24)
                 }
                 .buttonStyle(DroppyCircleButtonStyle(size: 24))
                 .a11y(isKeyVisible ? "settings.apiKey.hide" : "settings.apiKey.show")
@@ -366,8 +369,10 @@ struct TranslateTranslationSettings: View {
     private var keyInUseRow: some View {
         if model.providerHasKey {
             TranslateLabeledRow(title: L10n.tr("settings.key.current")) {
-                Button(L10n.tr("settings.key.remove")) {
+                Button {
                     model.removeProviderKey()
+                } label: {
+                    Text(L10n.tr("settings.key.remove"))
                 }
                 .buttonStyle(DroppyQuietButtonStyle(size: .small, destructive: true))
             }
@@ -378,8 +383,10 @@ struct TranslateTranslationSettings: View {
         TranslateLabeledRow(title: L10n.tr("settings.engine.test")) {
             HStack(spacing: DroppySpacing.sm) {
                 DropletValuePill(text: model.engineStatus.text)
-                Button(L10n.tr("settings.engine.test.action")) {
+                Button {
                     model.testEngineConnection()
+                } label: {
+                    Text(L10n.tr("settings.engine.test.action"))
                 }
                 .buttonStyle(DroppyAccentButtonStyle(size: .small))
                 .disabled(model.engineStatus == .testing)
@@ -467,6 +474,7 @@ struct TranslateLanguagePairRow: View {
             model.swapLanguageSelection()
         } label: {
             Image(systemName: "arrow.left.arrow.right")
+                .frame(width: 32, height: 32)
         }
         .buttonStyle(DroppyCircleButtonStyle(size: 32))
         .disabled(!model.canSwap)
@@ -475,14 +483,13 @@ struct TranslateLanguagePairRow: View {
     }
 }
 
-// MARK: - The preview page
+// MARK: - The display page
 
 struct TranslateDisplaySettings: View {
     @ObservedObject var model: TranslateModel
 
     var body: some View {
         DropletSettingsPage { sections }
-            .onAppear { model.refreshDisplayPreviewShape() }
     }
 
     @ViewBuilder
@@ -496,6 +503,14 @@ struct TranslateDisplaySettings: View {
         } content: {
             DropletSettingsCard {
                 TranslatePickerRow(
+                    title: L10n.tr("settings.panel.content"),
+                    options: Page.chosen,
+                    label: { L10n.tr("settings.panel.content.\($0.rawValue)") },
+                    glyph: { panelContentGlyph($0) },
+                    isSelected: { $0 == model.resultPage },
+                    action: { model.resultPage = $0 }
+                )
+                TranslatePickerRow(
                     title: L10n.tr("settings.result.destination"),
                     infoTip: destinationDescription,
                     options: ResultDisplay.allCases,
@@ -504,6 +519,14 @@ struct TranslateDisplaySettings: View {
                     isSelected: { $0 == model.resultDisplay },
                     action: { model.setResultDisplay($0) }
                 )
+                DropletStackedRow(
+                    title: L10n.tr("settings.result.examples"),
+                    infoTip: L10n.tr("settings.section.preview.sub")
+                ) {
+                    ResultDisplayPreview(display: model.resultDisplay, model: model)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, DroppySpacing.sm)
+                }
                 if model.resultDisplay == .sidePanel {
                     TranslatePickerRow(
                         title: L10n.tr("settings.sidePanel.edge"),
@@ -513,23 +536,6 @@ struct TranslateDisplaySettings: View {
                         isSelected: { $0 == model.sidePanelSide },
                         action: { model.sidePanelSide = $0 }
                     )
-                }
-                if model.resultDisplay == .panel {
-                    TranslatePickerRow(
-                        title: L10n.tr("settings.panel.content"),
-                        options: ResultContent.allCases,
-                        label: { L10n.tr("settings.panel.content.\($0.rawValue)") },
-                        glyph: { panelContentGlyph($0) },
-                        isSelected: { $0 == model.resultContent },
-                        action: { model.resultContent = $0 }
-                    )
-                }
-                DropletStackedRow(
-                    title: L10n.tr("settings.result.examples"),
-                    infoTip: L10n.tr("settings.section.preview.sub")
-                ) {
-                    displayPicture
-                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -541,28 +547,6 @@ struct TranslateDisplaySettings: View {
         case .panel: return L10n.tr("settings.display.panel.desc")
         case .sidePanel: return L10n.tr("settings.display.sidePanel.desc")
         }
-    }
-
-    /// The picture of the chosen place, with its name under it. One picture at
-    /// a time: the picker above says which place, and the row below shows that
-    /// one, so the page never offers a choice it has not taken.
-    private var displayPicture: some View {
-        VStack(spacing: DroppySpacing.xxxl) {
-            ResultDisplayPreview(display: model.resultDisplay, model: model)
-                .padding(.bottom, DroppySpacing.xxxl)
-
-            HStack(spacing: DroppySpacing.xs) {
-                Image(systemName: displayGlyph(model.resultDisplay))
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Text(L10n.tr("settings.display.\(model.resultDisplay.rawValue)"))
-                    .font(.callout)
-                    .foregroundStyle(.primary)
-            }
-            .accessibilityElement(children: .combine)
-        }
-        .padding(.top, DroppySpacing.xxl)
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -603,30 +587,43 @@ struct TranslatePermissionsSettings: View {
         }
     }
 
+    /// A granted right needs no control: the check is the whole message. A
+    /// right the user refused can only be fixed in System Settings, so the
+    /// button says where it goes.
     private func permissionRow(_ state: TranslateModel.PermissionState) -> some View {
         TranslateLabeledRow(
             title: L10n.tr(state.titleKey),
             subtitle: L10n.tr(state.detailKey),
             icon: icon(for: state.permission)
         ) {
-            HStack(spacing: DroppySpacing.sm) {
-                DropletValuePill(text: L10n.tr(state.statusKey))
-                switch state.status {
-                case .notDetermined:
-                    Button(L10n.tr("settings.permissions.allow")) {
-                        Task { await model.requestPermission(state.permission) }
-                    }
-                    .buttonStyle(DroppyAccentButtonStyle(size: .small))
-                case .denied:
-                    Button(L10n.tr("settings.permissions.open")) {
-                        model.openSystemSettings(for: state.permission)
-                    }
-                    .buttonStyle(DroppyQuietButtonStyle(size: .small))
-                case .granted, .unavailable:
-                    EmptyView()
-                @unknown default:
-                    EmptyView()
+            switch state.status {
+            case .granted:
+                HStack(spacing: DroppySpacing.xs) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color(nsColor: .systemGreen))
+                    Text(L10n.tr("settings.permissions.granted"))
+                        .foregroundStyle(.secondary)
                 }
+                .font(.subheadline)
+                .accessibilityElement(children: .combine)
+            case .notDetermined:
+                Button {
+                    Task { await model.requestPermission(state.permission) }
+                } label: {
+                    Text(L10n.tr("settings.permissions.grant"))
+                }
+                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+            case .denied:
+                Button {
+                    model.openSystemSettings(for: state.permission)
+                } label: {
+                    Text(L10n.tr("settings.permissions.open"))
+                }
+                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+            case .unavailable:
+                EmptyView()
+            @unknown default:
+                EmptyView()
             }
         }
     }
@@ -657,9 +654,15 @@ struct TranslateHelpSettings: View {
     @ViewBuilder
     var sections: some View {
         DropletSettingsSection {
-            iconHeader("settings.help.steps", symbol: "list.bullet.clipboard")
+            iconHeader("settings.help.start", symbol: "arrow.right.circle")
         } content: {
-            stepsCard
+            startCard
+        }
+
+        DropletSettingsSection {
+            iconHeader("settings.help.result", symbol: "text.bubble")
+        } content: {
+            resultCard
         }
 
         DropletSettingsSection {
@@ -675,22 +678,15 @@ struct TranslateHelpSettings: View {
         }
     }
 
-    private var stepsCard: some View {
+    private var startCard: some View {
         DropletSettingsCard {
-            ForEach(Array(Self.steps.enumerated()), id: \.offset) { index, step in
-                HStack(alignment: .firstTextBaseline, spacing: DroppySpacing.sm) {
-                    Text("\(index + 1).")
-                        .font(.callout.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .frame(width: 18, alignment: .trailing)
-                    Text(L10n.tr(step))
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.vertical, DroppySpacing.xs)
-                .accessibilityElement(children: .combine)
-            }
+            ForEach(Self.starts, id: \.text) { $0 }
+        }
+    }
+
+    private var resultCard: some View {
+        DropletSettingsCard {
+            ForEach(Self.behaviours, id: \.text) { $0 }
         }
     }
 
@@ -726,13 +722,30 @@ struct TranslateHelpSettings: View {
         }
     }
 
-    private static let steps = [
-        "help.step.type",
-        "help.step.capture",
-        "help.step.select",
-        "help.step.swap",
-        "help.step.result",
-        "help.step.copy"
+    /// The three ways in: what the user does first, not a sequence.
+    private static let starts = [
+        GuideLine(
+            symbol: "square.and.pencil",
+            title: "help.start.type.title",
+            text: "help.start.type"
+        ),
+        GuideLine(
+            symbol: "camera.viewfinder",
+            title: "help.start.capture.title",
+            text: "help.start.capture"
+        ),
+        GuideLine(
+            symbol: "character.cursor.ibeam",
+            title: "help.start.select.title",
+            text: "help.start.select"
+        )
+    ]
+
+    /// What happens to the text once it is in the card.
+    private static let behaviours = [
+        GuideLine(symbol: "rectangle.on.rectangle", text: "help.result.place"),
+        GuideLine(symbol: "arrow.left.arrow.right", text: "help.result.swap"),
+        GuideLine(symbol: "doc.on.doc", text: "help.result.copy")
     ]
 
     private static let shortcuts: [(key: String, text: String)] = [
@@ -740,6 +753,38 @@ struct TranslateHelpSettings: View {
         ("help.key.copy.key", "help.key.copy.text"),
         ("help.key.cancel.key", "help.key.cancel.text")
     ]
+}
+
+/// One line of the guide: a symbol, an optional short name and the words. Inert:
+/// the guide explains and points, nothing here changes a setting.
+private struct GuideLine: View {
+    let symbol: String
+    var title: String?
+    /// Localization keys, translated here so a list stays keys.
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: DroppySpacing.sm) {
+            Image(systemName: symbol)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                if let title {
+                    Text(L10n.tr(title))
+                        .fontWeight(.semibold)
+                }
+                Text(L10n.tr(text))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, DroppySpacing.xs)
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// A key reads as a key only when it is drawn like one, the way System
@@ -1046,10 +1091,10 @@ struct TranslatePickerRow<Option: Hashable>: View {
     }
 }
 
-private func panelContentGlyph(_ content: ResultContent) -> String {
+private func panelContentGlyph(_ content: Page) -> String {
     switch content {
-    case .result: return "textformat"
-    case .both: return "doc.on.doc"
+    case .pair: return "rectangle.grid.1x2"
+    default: return "rectangle"
     }
 }
 

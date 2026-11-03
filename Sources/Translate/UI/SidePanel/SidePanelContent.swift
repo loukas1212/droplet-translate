@@ -1,12 +1,6 @@
 import DroppyKit
 import SwiftUI
 
-/// The direction a drag on the shelf's handle asks the card to move.
-enum ShelfGripDrag: Equatable {
-    case up
-    case down
-}
-
 /// The expanded edge panel: a language row with the swap disc sunk into its
 /// bottom edge, and the shelf's source tile underneath.
 struct SidePanelContentView: View {
@@ -31,28 +25,42 @@ struct SidePanelContentView: View {
     var keepsGripInsideCard = false
     /// The floating panel is sized by its content, so it carries no handle.
     var showsGrip = true
+    /// True while the display setting shows the translation alone: the
+    /// original's box starts folded away. A fitting mount reads the setting
+    /// live, so the edge panel follows the picker; the shelf keeps its own.
+    var translationOnly = false
+    /// The setting as it stands now; the shelf follows it too, so every
+    /// surface shows the result face the same way.
+    private var translationOnlyNow: Bool {
+        !model.resultPage.showsOriginal
+    }
+    /// The panel fits its result box to the words in every mode; the shelf
+    /// keeps the resting box under the input.
+    var fitsResult = false
     var glassTiles = true
-    /// The tallest body this mount may draw; the shelf's fixed slot sets it.
+    /// The tallest body this mount may draw; the shelf's fixed slot and the
+    /// edge panel's cap set it.
     var maxBodyHeight = SidePanelContentView.maxPanelBodyHeight
     /// The shortest the input box may get. The shelf keeps the common floor;
-    /// the edge panel passes its taller opening.
+    /// the panels pass their own.
     var boxFloor = SidePanelContentView.minBoxHeight
+    /// The tallest the input box may get before it scrolls.
+    var boxCap = SidePanelContentView.panelMaxBoxHeight
     /// The shelf narrows the language row when it shares a grouped slot.
     var rowWidth = SidePanelContentView.defaultRowWidth
-    /// The shelf's card step, 0 to 2. The host owns the height; this only
-    /// decides how much of the input and the result the card shows.
-    var shelfStep = 0
-    /// How far the shelf's card has grown from its opening height to the
-    /// result's height, 0…1. The host writes it through the card's frame, so a
-    /// card resize needs no animation of its own here.
-    var shelfGrowth: CGFloat = 1
+    /// The widget rectangle's width. The shelf fits its result to the words at
+    /// the width they will wrap at; the panels use their own card width.
+    var mountWidth: CGFloat = 0
+    /// Reports the widget rectangle the shelf content needs, without the
+    /// host's content inset. The shelf budgets that inset and resizes.
+    var onShelfContentHeight: (CGFloat) -> Void = { _ in }
     var onShelfGripTap: (() -> Void)?
-    /// A drag on the shelf's handle: down asks for the next card height, up
-    /// for the one below. The host keeps the height; the drag only picks it.
-    var onShelfGripDrag: ((ShelfGripDrag) -> Void)?
     /// Starts a translation. The shelf raises its card so the result has room;
     /// the panel keeps its own submit.
     var onSubmit: (() -> Void)?
+    /// Empties the boxes from the footer. The shelf also folds its card back
+    /// to the opening step, which the content cannot do itself.
+    var onClear: (() -> Void)?
 
     /// Pins the edge panel's window. Nil on the shelf, whose menu pins the
     /// shelf through the model instead.
@@ -65,19 +73,61 @@ struct SidePanelContentView: View {
     var onBodyHeight: (CGFloat, Bool) -> Void = { _, _ in }
 
     /// One line of text plus the editor's insets, so the empty box still has
-    /// air above and below the placeholder. This is the shelf's short step.
-    /// With the 244pt result it makes the second card 440pt.
+    /// air above and below the placeholder. The panel's short box.
     static let minBoxHeight: CGFloat = 94
-    /// The edge panel opens its empty box a little taller, so the card does
-    /// not open pinched; its floor follows the panel, not the shelf's step.
-    /// With the panel's chrome it opens the card at 300pt.
+    /// The box the settings picture's stage is measured from; the live panels
+    /// open at their own floor.
     static let panelBoxFloor: CGFloat = 121
-    /// Beyond this the editor scrolls instead of growing. With the shelf's
-    /// chrome it makes the opening card 250pt.
+    /// Beyond this the panel's editor scrolls instead of growing.
     static let maxBoxHeight: CGFloat = 154
-    /// The panel's own box cap: its tallest input lands the card on 330pt, or
-    /// 580pt with the result under it.
+    /// The default box cap for a mount that does not set its own; with the
+    /// resting result it makes the tallest default card.
     static let panelMaxBoxHeight: CGFloat = 151
+
+    /// The input floor of every mount whose card carries the more menu: the
+    /// shelf, the edge panel and the floating panel. The card grows by this
+    /// box, so the two ends of the range are the two ends of the opening card.
+    /// The floor keeps the footer low enough that the open menu fits above it
+    /// instead of being cut at the top.
+    static var shelfBoxFloor: CGFloat {
+        PanelMoreMenu.height - (LanguageMenu.pillRowHeight + rowGap)
+    }
+    static let shelfBoxCap: CGFloat = 150
+    /// The cap's own floor: a taller input can never squeeze the answer below
+    /// it.
+    static let shelfResultFloor: CGFloat = 130
+    /// What a full card leaves for the result: the 478pt card minus the
+    /// inset, header, gaps and footer.
+    static let shelfResultMax: CGFloat = 380
+    /// The 16pt a notch card spends on its corner inset. The descriptor
+    /// includes it, so the content adds it when it reports its rectangle.
+    static let shelfContentInsetBudget: CGFloat = DroppySpacing.sm * 2
+
+    /// The card a shelf input and result need. A zero result is the bare
+    /// input; a full card has no input and spends its room on the result.
+    static func shelfCardHeight(input: CGFloat, result: CGFloat) -> CGFloat {
+        let resultSection = result > 0 ? resultGap + result : 0
+        return shelfContentInsetBudget + LanguageMenu.pillRowHeight + rowGap
+            + input + resultSection + footerHeight
+    }
+
+    /// The opening card: the input's floor and no result.
+    static var shelfOpeningCardHeight: CGFloat {
+        shelfCardHeight(input: shelfBoxFloor, result: 0)
+    }
+
+    /// The fold that gives the result the face: the panel folds its input
+    /// away, and the shelf does it on the same card.
+    /// The tallest result beside an input of `input` points. With no input the
+    /// result takes the full card.
+    static func shelfResultCap(input: CGFloat) -> CGFloat {
+        max(shelfResultFloor, shelfResultMax - input)
+    }
+
+    /// The floating panel wears the same card, so it shares the floor. Its box
+    /// scrolls at 150 to stay compact beside a capture.
+    static var floatingBoxFloor: CGFloat { shelfBoxFloor }
+    static let floatingBoxCap: CGFloat = 150
 
     /// Air above and below the text, equal so a single line lands on the box's
     /// mid-height. The paste and clear discs sit inside the bottom inset, and
@@ -88,6 +138,15 @@ struct SidePanelContentView: View {
     /// under the card stretches it taller. Below both sits the control strip.
     /// With the shelf's 94pt short box it makes the second card 440pt.
     static let resultBoxHeight: CGFloat = 244
+    /// The floating panel's result box fits its words between these; the card
+    /// is never left with an empty slab under a short sentence. Beside the
+    /// input the box is the input's height at the least, so the pair reads one
+    /// size until the answer outgrows it.
+    static var floatingResultFloor: CGFloat { floatingBoxFloor }
+    static let floatingResultCap: CGFloat = 400
+    /// The translation alone is fitted to its words up to this height, on the
+    /// shelf and both panels. Past it the box scrolls.
+    static let fittedResultCap: CGFloat = 380
     /// The transparent band below the card's face. The window grows by it, and
     /// the drag tab hangs in it.
     static let gripStrip: CGFloat = 36
@@ -95,7 +154,10 @@ struct SidePanelContentView: View {
     /// the air the tab keeps under it. A control outside its hosting view takes
     /// no click, so the view must cover the tab.
     static let pillStrip: CGFloat = gripStrip + 8
-    private static let resultGap: CGFloat = 6
+    /// The air the seam between the boxes keeps; the divider sits in its middle.
+    /// Odd, so the 3pt capsule splits it into whole points on a 1x display
+    /// instead of rounding to 3 above and 2 below.
+    private static let resultGap: CGFloat = 9
     /// The footer holds the more disc plus the rim that separates it from the
     /// box above — the same 6pt as the header's.
     private static let footerHeight: CGFloat = PanelFooterMetrics.footerHeight
@@ -103,28 +165,41 @@ struct SidePanelContentView: View {
     static let bodyFontSize: CGFloat = 14
     static let labelFontSize: CGFloat = 13
     fileprivate static let iconFontSize: CGFloat = 12
+    /// The width the input and the result draw into on every surface: the
+    /// panels' card less its side margin, and the shelf's the same, so the
+    /// pair reads one size wherever it is shown.
+    static let boxWidth: CGFloat = 425
+    /// Air a solo shelf card keeps between its edge and its boxes. The host
+    /// gives a notch card 8pt and a solo island card none, so the widget adds
+    /// its own and both draw the boxes at `boxWidth`.
+    static let shelfBoxInset: CGFloat = DroppySpacing.sm
+    /// The solo card the widget declares: the boxes plus the widget's air.
+    static var shelfSoloWidth: CGFloat { boxWidth + shelfBoxInset * 2 }
     /// The language row's width; both halves stay symmetric around the swap
-    /// disc at the card's centre.
-    static let defaultRowWidth: CGFloat = 254
+    /// disc at the card's centre. Narrower than the boxes, so the pair reads as
+    /// two labels round the disc rather than a bar across the card; the solo
+    /// shelf's 14pt labels still shrink no further than 0.8 before they clip.
+    static let defaultRowWidth: CGFloat = 226
     /// One label's box: the row minus the pocket, halved. Its inner edge is
     /// the pocket's tangent.
     static var rowHalf: CGFloat { (defaultRowWidth - discRadius * 2) / 2 }
     /// The air a language label keeps from its half's edges. Each half is
     /// centred on the swap disc, so both labels centre on their own side and
-    /// the pair still frames the disc.
-    private static let pillEdgeInset: CGFloat = 10
-    /// The mark's air above and below a language label. The row's sides are
-    /// cut by the padding each half already carries, so the mark ends on the
-    /// pocket's tangent and 3pt inside the capsule's end.
-    private static let rowMarkInset = PanelFooterMetrics.chipInset
+    /// the pair still frames the disc. It is also the room that keeps the solo
+    /// shelf's 14pt "Auto detect" whole while the label shrinks.
+    private static let pillEdgeInset: CGFloat = 8
     /// The pocket cut around the swap disc; its radius leaves a 6pt rim
-    /// between the pocket and the 40pt disc.
-    static let discRadius: CGFloat = 26
-    static let buttonDiameter: CGFloat = 40
+    /// between the pocket and the 36pt disc.
+    static let discRadius: CGFloat = 24
+    static let buttonDiameter: CGFloat = 36
     /// Gap between the pill row and the text box.
     private static let rowGap: CGFloat = 6
     /// Rounds the mouths that meet the seam.
     private static let seamFillet: CGFloat = 10
+    /// One corner for both boxes, so the input and the result read as a pair.
+    static let boxRadius: CGFloat = 28
+    /// The result page's close, in the row above its box. Nil hides it.
+    var onClose: (() -> Void)?
 
     /// The text box follows its content between these two states.
     @State private var inputHeight: CGFloat
@@ -136,13 +211,12 @@ struct SidePanelContentView: View {
     @State private var gripHover = false
     /// The grip's drag, while one is in flight.
     @State private var gripDrag: GripDrag?
-    /// How far the pointer has pulled the shelf's bar from its rest position;
-    /// the bar follows it, then asks the host for a step when it lets go.
-    @State private var shelfGripPull: CGFloat = 0
-    /// How far the input has folded into the result, 0…1. Step 3 hands the
-    /// input's space to the result, so the card stays at its tallest while the
-    /// result takes the whole face.
+    /// How far the input has folded into the result, 0…1. The result page
+    /// hands the input's space to the result, so the card stays at its tallest
+    /// while the result takes the whole face.
     @State private var inputFold: CGFloat = 0
+    /// The kit's slide animation reads Reduce Motion; the mark's spring is ours.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// A drag on the handle: the result height it started from, the height at
     /// which its input starts folding, the height it has pulled to now, the
     /// dead band it started with, and whether the pointer has left the click's
@@ -156,13 +230,16 @@ struct SidePanelContentView: View {
         /// The 6pt removed from the first movement, signed by the direction the
         /// drag started in, so reversing does not jump by twice the slop.
         var deadband: CGFloat
-        /// Step 3 (input folds into the result) needs something to read. A
+        /// The fold (input folds into the result) needs something to read. A
         /// status is not a result: the box stops at its resting height instead
         /// of stretching for text that never came.
         var hasResult: Bool
+        /// The content setting already folded the original, so the pull grows
+        /// the result instead of unfolding the input.
+        var foldsBySetting: Bool
         var started = false
-        /// A pull that reached the end of step 2 already asked for the
-        /// translation; one drag never asks twice.
+        /// A pull that reached the fold already asked for the translation; one
+        /// drag never asks twice.
         var translateStarted = false
     }
     /// The pointer is on the footer's more disc, or inside its open menu.
@@ -173,8 +250,7 @@ struct SidePanelContentView: View {
     @State private var moreCloseTask: Task<Void, Never>?
 
     /// `boxHeight` seeds the first frame; the editor takes over after its first
-    /// layout. Previewing a known state needs the seed, because the render test
-    /// cannot wait for the hosting view's second pass.
+    /// layout.
     init(
         model: TranslateModel,
         chip: SidePanelChipState,
@@ -185,25 +261,30 @@ struct SidePanelContentView: View {
         cancelSelection: @escaping () -> Void = {},
         boxHeight: CGFloat? = nil,
         boxFloor: CGFloat = SidePanelContentView.minBoxHeight,
+        boxCap: CGFloat = SidePanelContentView.panelMaxBoxHeight,
         /// The held drag a render test cannot produce; seeds the grip so the
         /// armed clear state can be photographed.
         gripPull: CGFloat? = nil,
-        /// The settled step 3 state: the result fills the card and the input is
-        /// folded away. `fold` also seeds a half-fold for a render test.
+        /// The settled fold state: the input is folded away and the result
+        /// keeps its fitted height. `fold` also seeds a half-fold for a render
+        /// test.
         fold: CGFloat = 0,
+        translationOnly: Bool = false,
+        fitsResult: Bool = false,
         keepsGripInsideCard: Bool = false,
         showsGrip: Bool = true,
         glassTiles: Bool = true,
         maxBodyHeight: CGFloat = SidePanelContentView.maxPanelBodyHeight,
         rowWidth: CGFloat = SidePanelContentView.defaultRowWidth,
-        shelfStep: Int = 0,
-        shelfGrowth: CGFloat = 1,
+        mountWidth: CGFloat = 0,
         onShelfGripTap: (() -> Void)? = nil,
-        onShelfGripDrag: ((ShelfGripDrag) -> Void)? = nil,
         onSubmit: (() -> Void)? = nil,
+        onClear: (() -> Void)? = nil,
+        onClose: (() -> Void)? = nil,
         onGripOut: @escaping (Bool) -> Void = { _ in },
         onPin: (() -> Void)? = nil,
-        onBodyHeight: @escaping (CGFloat, Bool) -> Void = { _, _ in }
+        onBodyHeight: @escaping (CGFloat, Bool) -> Void = { _, _ in },
+        onShelfContentHeight: @escaping (CGFloat) -> Void = { _ in }
     ) {
         _model = ObservedObject(wrappedValue: model)
         _chip = ObservedObject(wrappedValue: chip)
@@ -216,22 +297,56 @@ struct SidePanelContentView: View {
         self.onPin = onPin
         self.keepsGripInsideCard = keepsGripInsideCard
         self.showsGrip = showsGrip
+        self.translationOnly = translationOnly
+        self.fitsResult = fitsResult
         self.glassTiles = glassTiles
         self.maxBodyHeight = maxBodyHeight
         self.boxFloor = boxFloor
+        self.boxCap = boxCap
         self.rowWidth = rowWidth
-        self.shelfStep = shelfStep
-        self.shelfGrowth = min(max(shelfGrowth, 0), 1)
+        self.mountWidth = mountWidth
         self.onShelfGripTap = onShelfGripTap
-        self.onShelfGripDrag = onShelfGripDrag
         self.onSubmit = onSubmit
+        self.onClear = onClear
+        self.onClose = onClose
         self.onBodyHeight = onBodyHeight
+        self.onShelfContentHeight = onShelfContentHeight
         let box = boxHeight ?? boxFloor
-        let fold = min(max(fold, 0), 1)
+        let settled = min(max(fold, 0), 1)
+        // The panel opens on a result the user asked to see alone: the input
+        // starts folded, so the first frame is the card they chose. A status
+        // takes the same card, and an empty box keeps the input it is about.
+        let fold = settled > 0 || !translationOnly || !Self.showsResult(for: model)
+            ? settled
+            : 1
+        // The fitted mount's resting result: the words' own height on the
+        // panels, the shelf's fixed box otherwise. The translation alone
+        // carries the target picker and equal air around its words.
+        let aloneResult = fitsResult
+            && (translationOnly || !model.resultPage.showsOriginal)
+            && !model.output.isEmpty
+        let aloneStatus = (translationOnly || !model.resultPage.showsOriginal)
+            && Self.showsResult(for: model)
+        // The shelf's fixed box is its own; the panels open level with the
+        // input, so a short answer is not a shorter box beside it.
+        let restingResult: CGFloat = fitsResult
+            ? Self.restingResultHeight(
+                for: model,
+                alone: aloneResult || aloneStatus,
+                matching: box
+            )
+            : Self.resultBoxHeight
         _inputHeight = State(initialValue: box)
         _inputFold = State(initialValue: fold)
+        // The card that shows the translation alone opens at the words' own
+        // height, so a short result leaves no empty box under it. The floating
+        // panel fits every result, status included.
         _resultHeight = State(
-            initialValue: Self.resultBoxHeight + box * fold
+            initialValue: fitsResult
+                ? restingResult
+                : fold > 0 && translationOnly && !model.output.isEmpty
+                    ? Self.fittedResultHeight(text: model.output)
+                    : Self.resultBoxHeight + box * fold
         )
         _resultReveal = State(
             initialValue: Self.showsResult(for: model) ? 1 : 0
@@ -240,10 +355,11 @@ struct SidePanelContentView: View {
             initialValue: gripPull.map {
                 GripDrag(
                     startHeight: $0,
-                    foldStart: max($0, Self.resultBoxHeight),
+                    foldStart: max($0, restingResult),
                     pulled: $0,
                     deadband: 0,
-                    hasResult: false
+                    hasResult: false,
+                    foldsBySetting: false
                 )
             }
         )
@@ -251,11 +367,19 @@ struct SidePanelContentView: View {
 
     private var pillHeight: CGFloat { LanguageMenu.pillRowHeight }
 
-    /// The island's 16pt shelf inset plus the 1.5pt widget slot: the gap the
-    /// panel card keeps around its content on every edge.
+    /// The card's vertical content inset: the island's 16pt shelf inset plus
+    /// the 1.5pt widget slot, rounded to a whole point.
     static var inset: CGFloat {
-        DroppyShellMetrics.shelfContentInsets(usesNotchStyle: false).leading
-            + DroppyShellMetrics.shelfWidgetSlotInset
+        (DroppyShellMetrics.shelfContentInsets(usesNotchStyle: false).leading
+            + DroppyShellMetrics.shelfWidgetSlotInset).rounded()
+    }
+
+    /// The card's side margin: the host's shelf inset, the widget slot and the
+    /// air the solo shelf widget keeps around its boxes, so the panel's boxes
+    /// line up with the shelf's.
+    static var sideInset: CGFloat {
+        (DroppyShellMetrics.shelfContentInsets(usesNotchStyle: false).leading
+            + DroppyShellMetrics.shelfWidgetSlotInset + shelfBoxInset).rounded()
     }
 
     /// The card body that holds the header, a box of `box` points and, when a
@@ -276,35 +400,171 @@ struct SidePanelContentView: View {
 
     /// True once there is something to read: a result, a status or a notice.
     static func showsResult(for model: TranslateModel) -> Bool {
-        !model.output.isEmpty || model.status != .idle || model.notice != nil
+        model.page != .input
     }
 
-    /// The hosting view that draws a body of `body`: the card's content inset
-    /// on every edge, plus the strip the drag tab hangs in.
+    /// The hosting view that draws a body of `body`: the card's vertical
+    /// content inset above and below, plus the strip the drag tab hangs in.
     static func contentHeight(forBody body: CGFloat) -> CGFloat {
         body - inset * 2 + pillStrip
     }
 
-    /// The room a shelf card of `height` leaves for its boxes: the host's
-    /// rectangle minus the 16pt a notch spends on its corner inset and the
-    /// header and footer. A solo island card spends no inset and gives the
-    /// 16pt to its boxes instead, so the footer stays on the bottom edge in
-    /// both.
-    static func shelfRoom(forCardHeight height: CGFloat, showsHeader: Bool) -> CGFloat {
-        let header = showsHeader ? LanguageMenu.pillRowHeight + rowGap : 0
-        return height - DroppySpacing.sm * 2 - header - footerHeight
-    }
-
-    /// The shortest the card opens to with the input alone. The shelf's step
-    /// keeps the common box floor; the edge panel opens taller.
+    /// The shortest the shelf's card opens to with the input alone.
     static var minBodyHeight: CGFloat { bodyHeight(forBox: minBoxHeight) }
-    static var panelMinBodyHeight: CGFloat { bodyHeight(forBox: panelBoxFloor) }
     static var maxBodyHeight: CGFloat { bodyHeight(forBox: maxBoxHeight) }
-    /// The panel's tallest input alone, without a result under it.
-    static var panelMaxInputBodyHeight: CGFloat { bodyHeight(forBox: panelMaxBoxHeight) }
-    /// The tallest card, with the result box open. The window clamp uses this.
+    /// The floating panel's own floors and cap: its shorter input and fitted
+    /// result, with no fillet or grip strip on the window.
+    static var floatingMinBodyHeight: CGFloat { bodyHeight(forBox: floatingBoxFloor) }
+    static var floatingResultMinBodyHeight: CGFloat {
+        bodyHeight(forBox: 0, result: true, resultHeight: floatingResultFloor)
+    }
+    static var floatingMaxBodyHeight: CGFloat {
+        bodyHeight(forBox: floatingBoxCap, result: true, resultHeight: floatingResultCap)
+    }
+    /// The tallest default card, with the result box open; the panels pass
+    /// their own cap.
     static var maxPanelBodyHeight: CGFloat {
         bodyHeight(forBox: panelMaxBoxHeight, result: true)
+    }
+
+    /// The width the floating panel's boxes draw into: its card minus the
+    /// content inset on each side.
+    static var panelContentWidth: CGFloat { boxWidth }
+    /// Air above the result's words and under them, as the result scroll view
+    /// lays them out.
+    static let resultTextTop: CGFloat = 23
+    static let resultTextBottom: CGFloat = 48
+    /// The tallest result box the card may hold.
+    static var maxResultHeight: CGFloat {
+        maxPanelBodyHeight - bodyHeight(forBox: 0, result: true, resultHeight: 0)
+    }
+
+    /// The result box fitted to its words, for a card that shows the
+    /// translation alone. Its floor keeps the open more menu's top row whole.
+    static func fittedResultHeight(text: String) -> CGFloat {
+        let width = max(80, panelContentWidth - PanelTileText.sideInset * 2 - 10)
+        let height = resultTextTop * 2 + resultTextHeight(text, width: width)
+        return min(fittedResultCap, max(aloneResultFloor, height))
+    }
+
+    /// The lone result opens at the floor the open more menu leaves it, so the
+    /// menu's top row stays whole and a short translation is not a slab.
+    static var aloneResultFloor: CGFloat { menuFloor }
+
+    /// The shortest a result may be while the more menu still opens inside
+    /// the card's content.
+    static var menuFloor: CGFloat {
+        PanelMoreMenu.height - LanguageMenu.pillRowHeight - rowGap - resultGap
+    }
+
+    /// The floating panel's result box: the same air as the resting box,
+    /// capped at 400 so a long translation scrolls. `width` is
+    /// the card's content width when the mount is narrower than the panel.
+    /// `alone` fits the translation against the same 380 cap as the shelf.
+    /// `matching` is the input beside it; the box takes that height at the
+    /// least, so a short answer leaves the two boxes level.
+    static func floatingFittedResultHeight(
+        text: String,
+        width: CGFloat = 0,
+        alone: Bool = false,
+        matching input: CGFloat = 0
+    ) -> CGFloat {
+        let contentWidth = width > 0 ? width : panelContentWidth
+        let textWidth = max(80, contentWidth - PanelTileText.sideInset * 2 - 10)
+        let height = (alone ? resultTextTop * 2 : resultTextTop + resultTextBottom)
+            + resultTextHeight(text, width: textWidth)
+        if alone { return min(fittedResultCap, max(aloneResultFloor, height)) }
+        return min(floatingResultCap, max(max(floatingResultFloor, input), height))
+    }
+
+    /// The result box at rest: the words, or the status and its controls.
+    /// Beside the input the box is never shorter than the input, so a short
+    /// answer leaves the pair level and a long one makes the input smaller.
+    static func restingResultHeight(
+        for model: TranslateModel,
+        alone: Bool,
+        matching input: CGFloat,
+        width: CGFloat = 0
+    ) -> CGFloat {
+        if model.output.isEmpty {
+            let fitted = fittedStatusHeight(for: model, width: width, alone: alone)
+            return alone ? fitted : max(input, fitted)
+        }
+        return floatingFittedResultHeight(
+            text: model.output,
+            width: width,
+            alone: alone,
+            matching: input
+        )
+    }
+
+    /// The status box: the message and the recovery controls it shows, with
+    /// the same air above and below. A result beside it keeps its own floor;
+    /// a status alone takes the result page's floor so the more menu opens
+    /// whole over it.
+    @MainActor
+    static func fittedStatusHeight(
+        for model: TranslateModel,
+        width: CGFloat = 0,
+        alone: Bool = false
+    ) -> CGFloat {
+        let message = model.notice ?? statusMessage(for: model) ?? ""
+        let contentWidth = width > 0 ? width : panelContentWidth
+        let textWidth = max(80, contentWidth - PanelTileText.sideInset * 2)
+        var block = statusTextHeight(message, width: textWidth)
+        if model.status == .translating, block == 0 {
+            block = Self.statusRowHeight
+        }
+        if model.status == .needsDownload {
+            block += Self.statusControlHeight + DroppySpacing.sm
+        }
+        if model.canRetryTranslation {
+            block += Self.statusControlHeight + DroppySpacing.sm
+        }
+        let height = resultTextTop * 2 + block
+        let fitted = min(floatingResultCap, height)
+        return alone ? max(aloneResultFloor, fitted) : fitted
+    }
+
+    /// The progress row's height while a translation runs.
+    private static let statusRowHeight: CGFloat = 20
+
+    /// A small glass control's height, the download and retry buttons.
+    private static let statusControlHeight: CGFloat = 30
+
+    private static func statusTextHeight(_ text: String, width: CGFloat) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [
+                .font: NSFont.systemFont(ofSize: labelFontSize),
+                .paragraphStyle: paragraph
+            ]
+        )
+        return ceil(bounds.height)
+    }
+
+    /// The wrapped height of a result at the panel's type size, measured the
+    /// way the scroll view lays it out: character wrapping and a 5pt indent.
+    static func resultTextHeight(_ text: String, width: CGFloat) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.firstLineHeadIndent = 5
+        paragraph.headIndent = 5
+        paragraph.lineBreakMode = .byCharWrapping
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [
+                .font: NSFont.systemFont(ofSize: bodyFontSize),
+                .paragraphStyle: paragraph
+            ]
+        )
+        return ceil(bounds.height)
     }
 
     var body: some View {
@@ -313,28 +573,24 @@ struct SidePanelContentView: View {
             header
                 .frame(height: pillHeight + Self.discRadius, alignment: .top)
                 .zIndex(1)
-                // Step 3 ends with the result on the whole face; the language
+                // The result page ends with the result on the whole card; the language
                 // row clears out once the result is about to reach it.
                 .opacity(headerOpacity)
                 .allowsHitTesting(headerOpacity > 0)
             // The boxes ride the disc's pocket as one group: the tuck holds
-            // even when step 3 has shrunk the input to nothing.
+            // even when the fold has shrunk the input to nothing.
             VStack(spacing: 0) {
                 SourceTile(
                     model: model,
                     notch: nil,
                     showsLanguageMenu: false,
-                    glassTile: glassTiles,
-                    tileCornerRadius: 28,
+                    tileCornerRadius: Self.boxRadius,
                     editorTopInset: Self.editorTopInset,
                     editorBottomInset: Self.editorBottomInset,
                     onSubmit: onSubmit ?? model.translate,
                     onEditorHeight: { height in
-                        // The shelf's box grows to the card's room; the panel's
-                        // cap is the one that lands its card on 330pt.
-                        let boxCap = keepsGripInsideCard
-                            ? Self.maxBoxHeight
-                            : Self.panelMaxBoxHeight
+                        // The shelf and the panel each name their own box cap;
+                        // the card is sized from the same number.
                         let clamped = min(max(height, boxFloor), boxCap)
                         guard clamped != inputHeight else { return }
                         // The whole stack moves with the box: the header stays
@@ -346,56 +602,33 @@ struct SidePanelContentView: View {
                     showsInlineTools: false,
                     bodyFontSize: Self.bodyFontSize,
                     maxEditorHeight: keepsGripInsideCard
-                        ? (showsResult ? Self.maxBoxHeight : closedInputHeight)
-                        : Self.panelMaxBoxHeight,
+                        ? (displaysResult ? boxCap : closedInputHeight)
+                        : boxCap,
                     scrollerCap: keepsGripInsideCard
-                        ? (showsResult ? Self.maxBoxHeight : closedInputHeight)
-                        : Self.panelMaxBoxHeight,
+                        ? (displaysResult ? boxCap : closedInputHeight)
+                        : boxCap,
                     hoverChrome: true,
                     // Folded, the tile's frame is the input's old height while
                     // the result covers it; marking it would draw a wash over
                     // the result at a box that is no longer there.
-                    chipTarget: inputFold == 0 && displayedBoxHeight > 0 ? .input : nil,
+                    chipTarget: faceFold == 0 && displayedBoxHeight > 0 ? .input : nil,
                     pocketCut: glassTiles ? Self.inputCut : nil
                 )
                 // The box follows new lines with the card; the state change carries
-                // its own animation, so the footer travels with it. In step 3 it is
-                // a shrinking top slice: the result climbs over it, so the text is
+                // its own animation, so the footer travels with it. On the result page
+                // it is a shrinking top slice: the result climbs over it, so the text is
                 // never squashed, only covered.
                 .frame(height: inputTileHeight, alignment: .top)
                 .frame(height: displayedBoxHeight, alignment: .top)
                 .clipped()
-                // Inside the box, not the footer: they belong to the text they act
-                // on. The panel chip marks each one, so the disc keeps only its
-                // resting glass. Folded, the tools go with the box: a 0pt overlay
-                // would otherwise sit them on the language row.
-                .overlay(alignment: .bottomTrailing) {
-                    if inputFold == 0 && displayedBoxHeight > 0 {
-                        HStack(spacing: 6) {
-                            if !(model.input.isEmpty && model.output.isEmpty) {
-                                SidePanelBoxButton(symbol: "trash", a11yKey: "a11y.clear", target: .clear) {
-                                    model.clearInput()
-                                }
-                                .transition(.opacity)
-                            }
-                            // The paste control names itself: an icon alone reads as a tool,
-                            // and the word is what the user came to press.
-                            SidePanelPillButton(
-                                symbol: "clipboard.fill",
-                                title: L10n.tr("a11y.paste"),
-                                a11yKey: "a11y.paste",
-                                target: .paste
-                            ) {
-                                model.pasteInput()
-                            }
-                            .disabled(!model.canPaste)
-                        }
-                        .padding(.trailing, DroppySpacing.sm)
-                        .padding(.bottom, DroppySpacing.sm)
-                        .animation(DroppyAnimation.state, value: [model.input.isEmpty, model.output.isEmpty])
+                .allowsHitTesting(faceFold == 0 && displayedBoxHeight > 0)
+                // The pair reads as one field with a seam: the hairline sits in
+                // the air under the input, and follows its edge while it folds.
+                .overlay(alignment: .bottom) {
+                    if showsSeamDivider {
+                        PanelSeamDivider(gap: Self.resultGap)
                     }
                 }
-                .allowsHitTesting(inputFold == 0 && displayedBoxHeight > 0)
                 // A grip drag mounts the box before the result arrives, so the
                 // drag pulls the empty sheet out of the input instead of waiting
                 // for the status and then dropping the whole box in.
@@ -409,15 +642,14 @@ struct SidePanelContentView: View {
                         .padding(
                             .top,
                             resultOnScreen && visibleResultHeight > 0
-                                ? (shelfHeaderRise > 0 ? 0 : Self.resultGap - fullCardRise)
+                                ? (Self.resultGap - fullCardRise)
                                 : 0
                         )
                 }
             }
             .padding(
                 .top,
-                -(Self.discRadius - Self.rowGap) - Self.resultGap * inputFold
-                    - shelfHeaderRise
+                -(Self.discRadius - Self.rowGap) - Self.resultGap * faceFold
             )
             // The drop grows out of the input and pushes the footer down with
             // it; the extra height below is only visible while it stretches.
@@ -429,13 +661,15 @@ struct SidePanelContentView: View {
             .overlay(alignment: .bottom) {
                 if showsGrip { gripHandle }
             }
+            // The card is the sheet in front: its content may not draw past its
+            // own face, even on the frame where the window is still catching up
+            // with a body that just changed size. The chip stays outside this
+            // clip, so its spring can settle into the air the host keeps around
+            // the content instead of losing its rim on the card's edge.
+            .clipped()
 
             chipLayer
         }
-        // The card is the sheet in front: nothing it holds may draw past its
-        // own face, even on the frame where the window is still catching up
-        // with a body that just changed size.
-        .clipped()
         .coordinateSpace(name: SidePanelChipState.space)
         .environment(\.sidePanelChip, chip)
         // The panel's download pill asks the system for the pair itself; the
@@ -448,13 +682,13 @@ struct SidePanelContentView: View {
             switch phase {
             case .active(let point):
                 // Only a change of control republishes, so moving inside one
-                // control does not redraw the panel. Step 3 fades the language
-                // row out; its stale frames must not draw it back under the
+                // control does not redraw the panel. The result page fades the
+                // language row out; its stale frames must not draw it back under the
                 // chip.
                 let target = Self.target(
                     at: point,
                     frames: chip.frames,
-                    marksHeader: headerOpacity > 0
+                    marksHeader: headerOpacity > 0 && !showsResultPicker
                 )
                 if target != chip.target { chip.target = target }
             case .ended:
@@ -481,8 +715,22 @@ struct SidePanelContentView: View {
                 reportGrip()
                 return
             }
+            if keepsGripInsideCard {
+                reportShelfContentHeight()
+                return
+            }
             // Folded away, the input's height has no say in the card.
             guard inputFold == 0 else { return }
+            // The pair rides the input: a taller box lifts the result with it,
+            // and the answer only grows past it when its words need the room.
+            let level = Self.restingResultHeight(
+                for: model,
+                alone: showsAlone,
+                matching: height
+            )
+            if abs(level - resultHeight) > 0.5 {
+                withAnimation(DroppyAnimation.state) { resultHeight = level }
+            }
             // A taller input leaves less of the card's cap for the result.
             let cap = maxBodyHeight - Self.bodyHeight(forBox: height) - Self.resultGap
             if resultHeight > cap {
@@ -516,7 +764,11 @@ struct SidePanelContentView: View {
                 reportGrip()
                 return
             }
-            if !shown, inputFold > 0 {
+            if fitsResult {
+                settleResultHeight()
+            } else if translationOnlyNow {
+                settleTranslationOnly()
+            } else if !shown, inputFold > 0 {
                 withAnimation(DroppyAnimation.release) { inputFold = 0 }
             }
             onBodyHeight(
@@ -530,32 +782,117 @@ struct SidePanelContentView: View {
             withAnimation(DroppyAnimation.state) {
                 resultReveal = shown ? 1 : 0
             }
+            reportShelfContentHeight()
+        }
+        // The picker above the picture changes the card under it without
+        // recreating it, so the fold has to follow the setting here.
+        .onChange(of: translationOnly) { _, _ in
+            guard gripDrag == nil, displaysResult else { return }
+            settleResultHeight()
+            reportBodyHeight()
+        }
+        // The live edge panel reads the same setting, and its content view is
+        // built once, so the model is the one that tells it the picker moved.
+        .onChange(of: model.resultPage) { _, _ in
+            guard fitsResult, gripDrag == nil, displaysResult else { return }
+            settleResultHeight()
+            reportBodyHeight()
+        }
+        // A result that lands or changes refits the box to its words.
+        .onChange(of: model.output) { _, _ in
+            reportShelfContentHeight()
+            guard gripDrag == nil, fitsResult || translationOnlyNow else { return }
+            settleResultHeight()
+            reportBodyHeight()
+        }
+        // A status is fitted too: the box holds the message and its controls,
+        // not the resting slab a translation uses.
+        .onChange(of: model.notice) { _, _ in
+            reportShelfContentHeight()
+            guard gripDrag == nil, fitsResult, displaysResult else { return }
+            settleResultHeight()
+            reportBodyHeight()
+        }
+        .onChange(of: model.status) { _, _ in
+            reportShelfContentHeight()
+            guard gripDrag == nil, fitsResult, displaysResult else { return }
+            settleResultHeight()
+            reportBodyHeight()
+        }
+        .onChange(of: mountWidth) { _, _ in
+            reportShelfContentHeight()
+        }
+        .onChange(of: model.resultPage) { _, _ in
+            reportShelfContentHeight()
         }
         .onAppear {
             resultReveal = showsResult ? 1 : 0
             onBodyHeight(
-                Self.bodyHeight(forBox: inputHeight, result: showsResult, resultHeight: resultHeight),
+                Self.bodyHeight(
+                    forBox: keepsGripInsideCard ? inputHeight : displayedBoxHeight,
+                    result: showsResult,
+                    resultHeight: resultHeight
+                ),
                 false
             )
+            reportShelfContentHeight()
         }
+    }
+
+    /// The floating panel fits its box to whatever it holds: the translation,
+    /// or the status message and its controls, never shorter than the input
+    /// when both are shown.
+    private func settleResultHeight() {
+        guard fitsResult else {
+            settleTranslationOnly()
+            return
+        }
+        let folds = showsAlone
+        let height = Self.restingResultHeight(
+            for: model,
+            alone: folds,
+            matching: inputHeight
+        )
+        withAnimation(DroppyAnimation.release) {
+            inputFold = folds ? 1 : 0
+            resultHeight = height
+        }
+    }
+
+    /// "Translation only" folds the original away and fits the result box to
+    /// its words; every other choice gives the input its room back. The card
+    /// ends where the text does instead of leaving an empty box under it.
+    private func settleTranslationOnly() {
+        let folds = translationOnlyNow && displaysResult && !model.output.isEmpty
+        withAnimation(DroppyAnimation.release) {
+            inputFold = folds ? 1 : 0
+            resultHeight = folds
+                ? Self.fittedResultHeight(text: model.output)
+                : Self.resultBoxHeight
+        }
+    }
+
+    /// Tells the window the body the card now draws.
+    private func reportBodyHeight(animated: Bool = true) {
+        onBodyHeight(
+            Self.bodyHeight(
+                forBox: displayedBoxHeight,
+                result: displaysResult,
+                resultHeight: resultHeight
+            ),
+            animated
+        )
     }
 
     private var showsResult: Bool {
         Self.showsResult(for: model)
     }
 
-    /// The shelf's first step is the bare input, as the panel opens; the
-    /// result joins it from the second step. A notice still shows at the
-    /// first step, so an error is never hidden behind a tap. The panel shows
-    /// the result whenever it has one. While the card collapses, the result
-    /// stays mounted and shrinks with the height, so it leaves the stack only
-    /// when the input has taken the whole room.
-    private var displaysResult: Bool {
-        guard keepsGripInsideCard else { return showsResult }
-        if model.notice != nil { return true }
-        if shelfStep > 0 { return showsResult }
-        return showsResult && shelfGrowth > 0
-    }
+    /// The shelf's opening card is the bare input; the result joins it from
+    /// the second step. A status or notice with no translation yet still shows
+    /// on the opening card, so an error is never hidden behind a tap. The
+    /// panel shows the result whenever it has one.
+    private var displaysResult: Bool { showsResult }
 
     /// The result box is on screen: a grip is holding it, or a pull has
     /// revealed it. A stowed status keeps its state but not its seam.
@@ -572,15 +909,34 @@ struct SidePanelContentView: View {
         return displayedResultHeight * resultReveal
     }
 
+    /// The hairline between the original and its answer. It needs both boxes
+    /// on the card: with the result alone the input has folded away, and with
+    /// no answer yet there is no second box to part.
+    private var showsSeamDivider: Bool {
+        displaysResult && resultOnScreen && resultReveal >= 1
+            && displayedBoxHeight > 0 && visibleResultHeight > 0
+    }
+
     /// The result height the current mount draws. The shelf derives it from
     /// its card step; the panel's grip writes it.
     private var displayedResultHeight: CGFloat {
         keepsGripInsideCard ? shelfResultHeight : resultHeight
     }
 
-    /// The input's height on screen: step 3 folds it away a slice at a time
-    /// while the result takes the space. The shelf's steps trade the input
-    /// for the result and give it back as the card grows.
+    /// The result box at rest: the panels fit it to the words, level with the
+    /// input until the answer needs more room than the input gives it.
+    private var restingResultHeight: CGFloat {
+        guard fitsResult else { return Self.resultBoxHeight }
+        return Self.restingResultHeight(
+            for: model,
+            alone: showsAlone,
+            matching: inputHeight
+        )
+    }
+
+    /// The input's height on screen: the fold takes it away a slice at a time
+    /// while the result takes the space. The shelf's card trades the input
+    /// for the result and gives it back as it grows.
     private var displayedBoxHeight: CGFloat {
         if keepsGripInsideCard { return shelfInputHeight }
         return inputHeight * (1 - inputFold)
@@ -593,55 +949,103 @@ struct SidePanelContentView: View {
     }
 
     /// The room the shelf card leaves for its boxes: the content the host
-    /// actually hands over, minus the footer and, until step three, the
-    /// language row.
+    /// actually hands over, minus the header and footer. The header band stays
+    /// in the budget on every face; the result page covers it.
     private var shelfRoom: CGFloat {
-        let header = shelfStep == 2 ? 0 : pillHeight + Self.rowGap
-        return max(0, maxBodyHeight - (header + Self.footerHeight))
+        max(0, maxBodyHeight - (pillHeight + Self.rowGap + Self.footerHeight))
     }
 
     /// The input at the current step: the whole room while the result is out
-    /// of the picture, a short box beside the result, and nothing when the
-    /// result has the card to itself. Between steps one and two the box
-    /// follows the card's real growth, so the result grows out of it instead
-    /// of switching layouts. A notice at the first step takes the input's
-    /// place instead of hiding behind a taller card.
+    /// of the picture, the measured box beside the result, and nothing when
+    /// the answer has the card to itself.
     private var shelfInputHeight: CGFloat {
         guard keepsGripInsideCard else { return inputHeight }
         guard displaysResult else { return max(inputHeight, shelfRoom) }
-        if model.notice != nil, shelfStep == 0 { return 0 }
-        if shelfStep == 2 { return 0 }
-        // As on the edge panel, the box takes the height its own words need,
-        // so the insets stay visible instead of the text scrolling under the
-        // rims. The card is fixed, so the result gives up the room.
-        let shortBox = min(max(inputHeight, Self.minBoxHeight), Self.maxBoxHeight)
-        return shelfRoom - (shelfRoom - shortBox) * shelfGrowth
+        if showsAlone { return 0 }
+        return min(max(inputHeight, boxFloor), boxCap)
     }
 
     /// The result takes whatever the input leaves, so the two always fill the
-    /// card at the step the host gave them.
+    /// card at the height the host gave them. At the content's own height this
+    /// is the fitted result; while the host springs, it rides that height.
     private var shelfResultHeight: CGFloat {
         guard keepsGripInsideCard, displaysResult else { return 0 }
-        let input = shelfInputHeight
-        return max(0, shelfRoom - input - (input > 0 ? Self.resultGap : 0))
+        return max(0, shelfRoom - shelfInputHeight - Self.resultGap)
     }
 
     /// The height the shelf's input fills when no result is on screen: what
-    /// the fixed card leaves after the header and the footer.
+    /// the card leaves after the header and the footer.
     private var closedInputHeight: CGFloat {
         max(inputHeight, shelfRoom)
     }
 
-    /// How far the result climbs past the language row at the end of step 3,
-    /// measured from the seam it rests on: at full fold its top is the card's.
-    private var fullCardRise: CGFloat {
-        (pillHeight + Self.rowGap) * inputFold
+    /// The input height the shelf's card should budget for: the editor's
+    /// measured box, between the shelf's floor and cap. A full card has no
+    /// input to budget, but an empty full card falls back to the opening one.
+    private var shelfDesiredInputHeight: CGFloat {
+        if showsAlone { return 0 }
+        return min(max(inputHeight, boxFloor), boxCap)
     }
 
-    /// The disc's centre from the result box's top while the box sits under it.
-    private var resultPocketCentreY: CGFloat {
-        -Self.resultGap - Self.rowGap - displayedBoxHeight
-            + Self.resultGap * inputFold + fullCardRise
+    /// The result height the shelf's card should budget for: fitted to the
+    /// words or the status, and never shorter than the input beside it, so a
+    /// short answer leaves the pair level. The result alone fits the
+    /// translation up to its 380 cap.
+    private var shelfDesiredResultHeight: CGFloat {
+        guard displaysResult else { return 0 }
+        let input = shelfDesiredInputHeight
+        let cap = Self.shelfResultCap(input: input)
+        if model.output.isEmpty {
+            // The full face has no input above the footer, so the more menu
+            // needs the floor to open whole.
+            let fitted = Self.fittedStatusHeight(for: model, width: mountWidth)
+            return min(cap, max(input, Self.menuFloor, fitted))
+        }
+        let fitted = Self.floatingFittedResultHeight(
+            text: model.output,
+            width: mountWidth,
+            alone: showsAlone
+        )
+        return min(cap, max(input, fitted))
+    }
+
+    /// The widget rectangle the shelf content needs. The host draws a card
+    /// 16pt taller on the notch for its corner inset; the island spends none.
+    private var shelfDesiredContentHeight: CGFloat {
+        let input = shelfDesiredInputHeight
+        let result = shelfDesiredResultHeight
+        let resultSection = result > 0 ? Self.resultGap + result : 0
+        return pillHeight + Self.rowGap + input + resultSection + Self.footerHeight
+    }
+
+    private func reportShelfContentHeight() {
+        guard keepsGripInsideCard else { return }
+        onShelfContentHeight(shelfDesiredContentHeight)
+    }
+
+    /// How far the result climbs past the language row, measured from the seam
+    /// it rests on: at full fold its top is the card's.
+    private var faceFold: CGFloat {
+        // The result page takes the card's top on every surface, so the
+        // language row never sits above it looking like a second input card.
+        if showsAlone { return 1 }
+        return inputFold
+    }
+
+    /// The result page puts the target picker inside its box's top: the
+    /// language row is gone, so it is the one language control left.
+    private var showsResultPicker: Bool {
+        showsAlone
+    }
+
+    /// The chosen content is the translation alone, and there is something to
+    /// read: a translation, or a status that takes its box.
+    private var showsAlone: Bool {
+        translationOnlyNow && displaysResult
+    }
+
+    private var fullCardRise: CGFloat {
+        showsResultPicker ? 0 : (pillHeight + Self.rowGap) * faceFold
     }
 
     /// The soft band a held grip leaves on the box's face: the words near the
@@ -664,21 +1068,23 @@ struct SidePanelContentView: View {
     /// it crosses the edge. Past the fold the result climbs to the card's top
     /// and the language row gives way.
     private var resultBox: some View {
+        let outline = Self.resultOutline
         let tile = PanelResultTile(
             model: model,
             isDragging: gripDrag != nil,
-            reveal: resultReveal
+            reveal: resultReveal,
+            fitsHeight: fitsResult || keepsGripInsideCard
         )
             // The fold gives the result the gap it ate at the seam, so its
             // bottom keeps the footer's air instead of riding up with it.
-            .frame(height: displayedResultHeight + fullCardRise + Self.resultGap * inputFold)
+            .frame(height: displayedResultHeight + fullCardRise + Self.resultGap * faceFold)
             .frame(
                 height: displayedResultHeight * resultReveal + fullCardRise
-                    + Self.resultGap * inputFold,
+                    + Self.resultGap * faceFold,
                 alignment: .top
             )
             .clipped()
-        return ZStack(alignment: .top) {
+        let box = ZStack(alignment: .top) {
             tile
                 .mask(alignment: .bottom) {
                     ZStack(alignment: .bottom) {
@@ -709,47 +1115,40 @@ struct SidePanelContentView: View {
         }
         // The rim the glass draws is the rim the words live in: a rect clip
         // would let a line show past the rounded corner.
-        .clipShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
-        .background {
-            let shape = RoundedRectangle(cornerRadius: 29, style: .continuous)
-            if glassTiles {
-                if resultOnScreen {
-                    FrostedTileSurface(shape: AnyShape(shape))
-                        .mask {
-                            GlassPocketMask(
-                                shape: AnyShape(shape),
-                                centreY: resultPocketCentreY,
-                                radius: Self.discRadius,
-                                topFillet: Self.seamFillet,
-                                erase: headerOpacity
-                            )
-                        }
-                } else {
-                    FrostedTileSurface(shape: AnyShape(shape))
-                }
-            } else {
-                shape.fill(AdaptiveColors.notchSurfaceCardFill)
-            }
-        }
+        .clipShape(outline)
         // The mark covers what is on screen, not the whole box: the rest is
         // under the card's edge, so a full-height frame would let the chip's
         // glass hang outside it. A stowed box marks nothing, or the mark draws
         // the box back on screen above its own clip.
         .chipTarget(resultReveal >= 1 ? .result : nil)
+        return box
+    }
+
+    /// The result page's language control: the target, in the same pill the
+    /// card's row draws, so the one picker and the row's languages match.
+    private var resultTargetMenu: some View {
+        LanguageMenu(
+            model: model,
+            selection: $model.targetID,
+            includesAuto: false,
+            label: model.name(for: model.targetID),
+            fontSize: headerFontSize,
+            alignment: .center,
+            edgeInset: headerEdgeInset,
+            chipTarget: .resultTarget,
+            availableIDs: model.installedTargetIDs,
+            footerPill: true
+        )
+        .chipTarget(.resultTarget)
     }
 
     /// The language row stays usable until the result is about to reach it,
-    /// then clears out of its way. The shelf's last step gives the row to the
-    /// result outright.
+    /// then clears out of its way. The result page hands its language to the
+    /// picker in the row above the box.
     private var headerOpacity: Double {
-        if keepsGripInsideCard, shelfStep == 2 { return 0 }
-        let fade = min(max((inputFold - 0.7) / 0.3, 0), 1)
+        if showsResultPicker { return 1 }
+        let fade = min(max((faceFold - 0.7) / 0.3, 0), 1)
         return Double(1 - fade)
-    }
-
-    /// How far the shelf's last step pulls the boxes over the language row.
-    private var shelfHeaderRise: CGFloat {
-        keepsGripInsideCard && shelfStep == 2 ? pillHeight + Self.rowGap : 0
     }
 
     /// The first 6pt of a drag are the click's slop; past it the box follows
@@ -784,21 +1183,15 @@ struct SidePanelContentView: View {
     /// The bar is the whole resting affordance; the handle grows around it.
     static let gripRestBar = CGSize(width: 22, height: 3)
     static let gripOutBar = CGSize(width: 30, height: 4)
-    /// The shelf's bar keeps a little air under it, so it has room to travel
-    /// down while the pointer holds it, the way the card can only move in
-    /// whole steps.
+    /// The shelf's bar keeps a little air under it.
     static let shelfGripLift: CGFloat = 12
-    /// How far the pointer may pull the shelf's bar from its rest position.
-    /// It travels as far up as down: the 12pt of air under the bar is the
-    /// room the card gives it, and a longer pull up read as a different handle.
-    static let shelfGripPullRange: ClosedRange<CGFloat> = -shelfGripLift...shelfGripLift
     static let gripHitSize = CGSize(width: gripWidth, height: gripStrip)
 
     /// The visible result height a drag of `translation` asks for, measured
     /// from `start`. `deadband` is the signed slop removed from the movement.
     /// A negative result is the pull past a fully folded box, where the clear
     /// action arms. `full` lets the result grow by the input's own height, so
-    /// step 3 trades the two boxes and keeps the card the size it was; without
+    /// the fold trades the two boxes and keeps the card the size it was; without
     /// a result to read, the pull stops at the resting box, so a status never
     /// stretches the card.
     static func gripHeight(
@@ -811,7 +1204,7 @@ struct SidePanelContentView: View {
     ) -> CGFloat {
         let ceiling = full
             ? max(start, foldStart + box)
-            : SidePanelContentView.resultBoxHeight
+            : foldStart
         let cap = max(start, ceiling)
         return min(start + translation - deadband, cap)
     }
@@ -830,6 +1223,20 @@ struct SidePanelContentView: View {
         return min(max(pulled - foldStart, 0) / box, 1)
     }
 
+    /// The input fold a pull asks for. A card the display setting already
+    /// folded keeps it folded, so the pull grows the result instead of
+    /// bringing the original back.
+    static func gripFold(
+        pulled: CGFloat,
+        box: CGFloat,
+        full: Bool,
+        foldStart: CGFloat,
+        foldsBySetting: Bool
+    ) -> CGFloat {
+        guard !foldsBySetting else { return 1 }
+        return inputFold(pulled: pulled, box: box, full: full, foldStart: foldStart)
+    }
+
     /// The end of step 2 is the start button: a pull that reaches the resting
     /// box's height asks for the translation, the same as Return. A box that
     /// already reads is only being resized, and a run in flight is not
@@ -838,25 +1245,34 @@ struct SidePanelContentView: View {
         pulled: CGFloat,
         hasInput: Bool,
         hasOutput: Bool,
-        isTranslating: Bool
+        isTranslating: Bool,
+        resting: CGFloat = SidePanelContentView.resultBoxHeight
     ) -> Bool {
-        pulled >= resultBoxHeight && hasInput && !hasOutput && !isTranslating
+        pulled >= resting && hasInput && !hasOutput && !isTranslating
     }
 
     /// Pulls the result box `pulled` points out of the input; a negative pull
     /// folds it away. The box keeps at least its resting height, so its text
     /// never squeezes; only the slice on screen follows the pointer. Past the
     /// seam the input folds into the result with the pointer, so the result
-    /// climbs to the card's top while the card keeps its height.
-    private func applyGrip(_ pulled: CGFloat, full: Bool, foldStart: CGFloat) {
+    /// climbs to the card's top while the card keeps its height. A card the
+    /// content setting already folded has no input left to trade, so the same
+    /// pull grows the result and the card with it.
+    private func applyGrip(
+        _ pulled: CGFloat,
+        full: Bool,
+        foldStart: CGFloat,
+        foldsBySetting: Bool
+    ) {
         let visible = max(pulled, 0)
-        let height = max(visible, Self.resultBoxHeight)
+        let height = max(visible, restingResultHeight)
         let reveal = height > 0 ? min(1, visible / height) : 0
-        let fold = Self.inputFold(
+        let fold = Self.gripFold(
             pulled: pulled,
             box: inputHeight,
             full: full,
-            foldStart: foldStart
+            foldStart: foldStart,
+            foldsBySetting: foldsBySetting
         )
         if abs(resultHeight - height) > 0.5 { resultHeight = height }
         if abs(resultReveal - reveal) > 0.001 { resultReveal = reveal }
@@ -871,7 +1287,7 @@ struct SidePanelContentView: View {
     private func reportGrip() {
         guard let drag = gripDrag else { return }
         let visible = max(drag.pulled, 0)
-        let height = max(visible, Self.resultBoxHeight)
+        let height = max(visible, restingResultHeight)
         let reveal = height > 0 ? min(1, visible / height) : 0
         onBodyHeight(
             Self.bodyHeight(
@@ -885,11 +1301,32 @@ struct SidePanelContentView: View {
     }
 
     /// Lets go: a result springs the box open, a status stows when the pull is
-    /// closer to closed, and an empty box folds back into the input. Step 3
-    /// settles on whichever side of the fold the pointer was closer to.
+    /// closer to closed, and an empty box folds back into the input. The fold
+    /// settles on whichever side the pointer was closer to. A card
+    /// the display setting folded has no input to stow, so a pull that hides
+    /// the result springs back to the fitted box.
     private func settleGrip(_ drag: GripDrag) {
+        // The setting and the words on the card decide what lands, not the
+        // drag's start: a pull that asks for the translation and gets one
+        // ends on the translation alone.
+        if showsAlone {
+            // A pull that brought the translation in settles on the fitted box;
+            // a card that already held one keeps the height it was pulled to.
+            let fullCard = drag.hasResult && drag.pulled > drag.foldStart + inputHeight / 2
+            let height = fullCard ? drag.foldStart + inputHeight : restingResultHeight
+            withAnimation(DroppyAnimation.release) {
+                inputFold = 1
+                resultHeight = height
+                resultReveal = 1
+            }
+            onBodyHeight(
+                Self.bodyHeight(forBox: 0, result: true, resultHeight: height),
+                true
+            )
+            return
+        }
         let stows = !showsResult
-            || (model.output.isEmpty && drag.pulled < Self.resultBoxHeight / 2)
+            || (model.output.isEmpty && drag.pulled < restingResultHeight / 2)
         if stows {
             stowResultBox()
             return
@@ -897,7 +1334,7 @@ struct SidePanelContentView: View {
         let fullCard = drag.hasResult && drag.pulled > drag.foldStart + inputHeight / 2
         let height = fullCard
             ? drag.foldStart + inputHeight
-            : max(Self.resultBoxHeight, min(drag.pulled, drag.foldStart))
+            : max(restingResultHeight, min(drag.pulled, drag.foldStart))
         withAnimation(DroppyAnimation.release) {
             inputFold = fullCard ? 1 : 0
             resultHeight = height
@@ -917,7 +1354,7 @@ struct SidePanelContentView: View {
     private func stowResultBox() {
         withAnimation(DroppyAnimation.release) {
             inputFold = 0
-            resultHeight = Self.resultBoxHeight
+            resultHeight = restingResultHeight
             resultReveal = 0
         }
         onBodyHeight(Self.bodyHeight(forBox: inputHeight), true)
@@ -1002,202 +1439,204 @@ struct SidePanelContentView: View {
 
     // MARK: - The chip
 
-    /// The panel's sliding effect: one piece of glass that marks the control
-    /// under the pointer, wherever it sits in the panel.
+    /// The panel's sliding effect: one mark that travels to the control under
+    /// the pointer, wherever it sits in the panel.
     private var chipLayer: some View {
         ZStack(alignment: .topLeading) {
             boxWash
-            chipGlass
+            glassMark
             chipInk
-            moreGlyph
-            engineLabel
         }
         .allowsHitTesting(false)
-        // One clock for the whole mark: the glass travels, the ink it leaves
-        // fades out above the control and the ink it reaches fades in, so no
-        // label jumps to the destination before the glass lands there.
-        .animation(DroppyAnimation.tabSelect, value: chip.target)
+        .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: chip.target)
     }
 
     /// The pocket the swap disc cuts out of the input box. The chip's wash uses
     /// the same numbers, so the mark is the box and not a capsule over it.
     static var inputCut: SidePanelBoxCut {
-        SidePanelBoxCut(centreY: -rowGap, radius: discRadius, fillet: seamFillet, corner: 28)
+        SidePanelBoxCut(centreY: -rowGap, radius: discRadius, fillet: seamFillet, corner: boxRadius)
     }
 
-    /// The mark under the pointer, lit in its own silhouette. Glass cannot take
-    /// a shape with a hole, so a box takes the wash the kit's glass carries; a
-    /// menu row takes it too, because it already sits on the menu's glass. The
-    /// wash shares the glass's frame, so a move to or from one travels the same
-    /// path as any other control; only the material changes.
+    /// Every box's outline: one corner for the input and the result.
+    static var resultOutline: AnyShape {
+        AnyShape(RoundedRectangle(cornerRadius: boxRadius, style: .continuous))
+    }
+
+    /// Whether the pointer is holding a marked control. A held box is not a
+    /// button, so it keeps its resting wash.
+    private var pressedMark: Bool {
+        chip.pressed && chip.target?.isBox == false
+    }
+
+    /// The control the mark rests on, or the one it last marked.
+    private var markedTarget: SidePanelChipTarget? {
+        chip.target ?? chip.lastTarget
+    }
+
+    /// The two boxes aren't buttons: their words sit on the text itself, so the
+    /// mark washes them neutrally and spills no light.
+    private var markedIsControl: Bool {
+        markedTarget?.isControl ?? false
+    }
+
+    /// The wash a marked control takes: faint enough to leave the control's
+    /// own glass and ink readable.
+    private var washFill: Color {
+        chip.markFill(for: markedTarget)
+    }
+
+    /// The light the mark spills just outside the control's rim.
+    private var markGlow: Color {
+        chip.markGlow(for: markedTarget)
+    }
+
+    /// The mark under the pointer, lit in its own silhouette. A box takes the
+    /// neutral wash the kit's glass carries. A button takes the same wash only
+    /// where there is no Liquid Glass; above that, `glassMark` is the mark.
     @ViewBuilder
     private var boxWash: some View {
-        if let rect = markedRect {
-            // The kit's hover wash is 0.06, which disappears on this black card.
-            // 0.14 reads as the same lift the glass controls take.
-            washShape
-                .fill(AdaptiveColors.overlayAuto(0.14))
-                .frame(width: rect.width, height: rect.height)
-                .offset(x: rect.minX, y: rect.minY)
-                .opacity(marksWash ? 1 : 0)
-                .animation(DroppyAnimation.tabSelect, value: rect)
-                .animation(DroppyAnimation.state, value: marksWash)
+        if let rect = markedRect,
+           markedTarget?.isBox == true || !SidePanelChipState.hasLiquidGlass {
+            ZStack(alignment: .topLeading) {
+                washShape
+                    .stroke(markGlow, lineWidth: SidePanelChipState.markGlowWidth)
+                    .blur(radius: SidePanelChipState.markGlowRadius)
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+                washShape
+                    .fill(washFill)
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+            }
+            .opacity(chip.target == nil ? 0 : 1)
+            .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: rect)
+            .animation(DroppyAnimation.hoverQuick, value: pressedMark)
+            .animation(DroppyAnimation.state, value: markedIsControl)
+            .animation(DroppyAnimation.state, value: chip.target == nil)
         }
     }
 
-    /// The silhouette the wash takes: a box keeps its disc pocket, a menu row
-    /// follows the menu's own corners.
+    /// The silhouette the wash takes: the input keeps its disc pocket, the
+    /// result is a plain box, and a menu row follows the menu's own corners.
     private var washShape: AnyShape {
-        switch chip.target ?? chip.lastTarget {
+        if let rect = markedRect, abs(rect.width - rect.height) < 0.5, markedIsControl {
+            return AnyShape(Circle())
+        }
+        switch markedTarget {
         case .input:
             return AnyShape(SidePanelBoxChipShape(cut: Self.inputCut))
         case .result:
-            if headerOpacity > 0 {
-                return AnyShape(
-                    SidePanelBoxChipShape(
-                        cut: SidePanelBoxCut(
-                            centreY: resultPocketCentreY,
-                            radius: Self.discRadius,
-                            fillet: Self.seamFillet,
-                            corner: 29
-                        )
-                    )
-                )
-            }
-            return AnyShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+            return AnyShape(RoundedRectangle(cornerRadius: Self.boxRadius, style: .continuous))
         case .menuCapture, .menuSelect, .menuPin, .menuSettings:
-            return AnyShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+            return AnyShape(Capsule(style: .continuous))
         default:
-            return AnyShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+            return AnyShape(Capsule(style: .continuous))
         }
     }
 
-    /// The engine capsule's ink is drawn here while the chip covers the
-    /// capsule, above the chip's own glass. At rest the control draws it, so
-    /// the word survives even when the chip has no frame to place it.
+    /// The mark under the pointer: one capsule of Liquid Glass, on macOS 26.
+    /// The control's ink reads through it, so the glass needs no copy of it.
     @ViewBuilder
-    private var engineLabel: some View {
-        if let frame = chip.frames[.engine] {
-            PanelEngineLabel(model: model)
-                .frame(width: frame.width, height: frame.height)
-                .offset(x: frame.minX, y: frame.minY)
-                .opacity(chip.covers(.engine) ? 1 : 0)
-                .animation(DroppyAnimation.state, value: chip.target)
-        }
-    }
-
-    /// The more disc's dots live here while the chip covers it, above the
-    /// chip's own glass.
-    @ViewBuilder
-    private var moreGlyph: some View {
-        if let frame = chip.frames[.more] {
-            PanelMoreGlyph(
-                iconFont: 12,
-                rotation: model.isToolbarExpanded ? 90 : 0
-            )
-                .frame(width: frame.width, height: frame.height)
-                .offset(x: frame.minX, y: frame.minY)
-                .opacity(chip.covers(.more) ? 1 : 0)
-                .animation(DroppyAnimation.state, value: chip.target)
-                .animation(DroppyAnimation.state, value: model.isToolbarExpanded)
-        }
-    }
-
-    /// Where the mark sits: the control under the pointer, or the one it last
-    /// covered. Both materials ride this frame, so every move is a slide.
-    private var markedRect: CGRect? {
-        chip.rect(resting: nil)
-    }
-
-    /// True when the mark rests on a control that takes the wash instead of
-    /// glass: a box, or a row of the more menu.
-    private var marksWash: Bool {
-        chip.marksWithWash(chip.target)
-    }
-
-    /// The glass over the marked control. It takes that control's silhouette
-    /// and keeps its frame; the ink carries the hover and press. A wash control
-    /// hides it, but it still travels with the mark on its way there, so the
-    /// hand-off reads as one piece of glass changing material, not two marks
-    /// blinking.
-    @ViewBuilder
-    private var chipGlass: some View {
-        if let rect = markedRect {
-            let destination = chip.target.flatMap { chip.frames[$0] } ?? rect
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .droppyGlassControlChrome(
-                    shape: AnyShape(
-                        LiquidChipShape(
-                            rect: rect,
-                            destination: CGPoint(x: destination.midX, y: destination.midY)
-                        )
-                    ),
-                    isHovering: true
-                )
-                .opacity(chip.target == nil || marksWash ? 0 : 1)
-                .animation(DroppyAnimation.tabSelect, value: rect)
-                .animation(DroppyAnimation.state, value: marksWash)
+    private var glassMark: some View {
+        if SidePanelChipState.hasLiquidGlass,
+           let marked = markedTarget, !marked.isBox,
+           let rect = markedRect {
+            SidePanelChipGlass(rect: rect)
+                .opacity(chip.target == nil ? 0 : 1)
+                .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: rect)
                 .animation(DroppyAnimation.state, value: chip.target == nil)
         }
     }
 
-    /// The marked control's ink, drawn above the glass so the glass never sits
-    /// over the glyph.
+    /// The marked control's own ink, redrawn above the glass so its glyph and
+    /// words stay crisp. Each case mirrors the control it marks; a menu row
+    /// reads the same content the row itself draws.
     @ViewBuilder
-    private var chipInk: some View {
-        if let target = chip.target, let frame = chip.frames[target] {
-            PanelChipInk(scale: chip.inkScale) {
-                markedInk(for: target)
-                    .frame(width: frame.width, height: frame.height)
-            }
-            .offset(x: frame.minX, y: frame.minY)
-            // A new mark is a new copy: the old ink fades where it stood while
-            // the new one grows at its control, so the glyphs never swap before
-            // the glass has travelled.
-            .id(target)
-            .transition(.opacity)
-        }
-    }
-
-    /// The ink each marked control draws for itself. The control hides its
-    /// own copy while the chip covers it, so only one of them is ever seen.
-    @ViewBuilder
-    private func markedInk(for target: SidePanelChipTarget) -> some View {
+    private func chipInk(for target: SidePanelChipTarget) -> some View {
         switch target {
         case .source:
             PillLanguageLabel(
                 text: sourceLabel(for: model),
                 highlighted: true,
-                fontSize: Self.bodyFontSize,
+                fontSize: headerFontSize,
                 alignment: .center,
-                edgeInset: Self.pillEdgeInset
+                edgeInset: headerEdgeInset
             )
         case .target:
             PillLanguageLabel(
                 text: model.name(for: model.targetID),
                 highlighted: true,
-                fontSize: Self.bodyFontSize,
+                fontSize: headerFontSize,
                 alignment: .center,
-                edgeInset: Self.pillEdgeInset
+                edgeInset: headerEdgeInset
+            )
+        case .resultTarget:
+            PillLanguageLabel(
+                text: model.name(for: model.targetID),
+                highlighted: true,
+                fontSize: headerFontSize,
+                alignment: .center,
+                edgeInset: headerEdgeInset
             )
         case .swap:
             SidePanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
+        case .more:
+            PanelMoreGlyph(
+                iconFont: 12,
+                rotation: model.isToolbarExpanded ? 90 : 0
+            )
+        case .engine:
+            PanelEngineLabel(
+                model: model,
+                compact: rowWidth < Self.defaultRowWidth,
+                showsIcon: rowWidth < Self.defaultRowWidth
+            )
         case .download:
             PanelDownloadLabel()
         case .copy:
-            SidePanelPillLabel(
-                symbol: model.copied ? "checkmark" : "document.on.document",
-                text: L10n.tr("copy")
-            )
+            SidePanelPillLabel(symbol: footerActionSymbol, text: footerActionTitle)
         case .paste:
             SidePanelPillLabel(symbol: "clipboard.fill", text: L10n.tr("a11y.paste"))
         case .clear:
-            SidePanelDiscGlyph(symbol: "trash")
-        case .more, .engine, .input, .result,
-             .menuCapture, .menuSelect, .menuPin, .menuSettings:
+            PanelClearGlyph()
+        case .close:
+            Image(systemName: "xmark")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
+        case .menuCapture, .menuSelect, .menuPin, .menuSettings:
+            if let content = PanelMoreMenu.content(
+                for: target,
+                model: model,
+                pinned: onPin == nil ? nil : pin.isPinned,
+                pinDisabled: onPin == nil ? !model.canPin : false
+            ) {
+                PanelToolRowLabel(
+                    content: content,
+                    opacity: content.disabled ? 0.4 : 1
+                )
+            }
+        case .input, .result:
             EmptyView()
         }
+    }
+
+    @ViewBuilder
+    private var chipInk: some View {
+        if let target = chip.target,
+           let frame = chip.frames[target],
+           target.isControl {
+            chipInk(for: target)
+                .frame(width: frame.width, height: frame.height)
+                .offset(x: frame.minX, y: frame.minY)
+                .id(target)
+                .transition(.opacity)
+        }
+    }
+
+    /// Where the mark sits: the control under the pointer, or the one it last
+    /// marked. The mark rides this frame, so every move is a slide.
+    private var markedRect: CGRect? {
+        chip.rect(resting: nil)
     }
 
     /// Opens the more menu while the pointer is on its disc or in the panel,
@@ -1235,6 +1674,9 @@ struct SidePanelContentView: View {
     private var footer: some View {
         // The more disc keeps the boxes' leading edge, bottom left; the engine
         // picker sits on the trailing edge, where the menu rows cannot reach it.
+        // The trash sits beside the more disc so clearing never moves it, and
+        // the paste/copy pill takes the slot past it, so the action stays put
+        // when the boxes fold.
         HStack(alignment: .center, spacing: DroppySpacing.sm) {
             ToolbarCapsule(
                 model: model,
@@ -1246,12 +1688,18 @@ struct SidePanelContentView: View {
                 onMoreHover: { moreHover($0, inMenu: false) },
                 chipTarget: .more
             )
+            if hasContent {
+                clearButton
+                    .transition(.opacity)
+            }
+            footerAction
             Spacer(minLength: 0)
             PanelEngineMenu(
                 model: model,
-                showsCaption: rowWidth >= Self.defaultRowWidth
+                compact: rowWidth < Self.defaultRowWidth
             )
         }
+        .animation(DroppyAnimation.state, value: hasContent)
         .frame(height: Self.footerHeight, alignment: .bottom)
         .overlay(alignment: .bottomLeading) {
             // The rows start on the footer's top edge, so the disc stays in
@@ -1271,6 +1719,73 @@ struct SidePanelContentView: View {
         }
     }
 
+    /// One pill for both clipboard actions: paste until there is a result to
+    /// copy, so the footer keeps one slot instead of growing a second control.
+    private var footerAction: some View {
+        SidePanelPillButton(
+            symbol: footerActionSymbol,
+            title: footerActionTitle,
+            a11yKey: footerActionCopying
+                ? (model.copied ? "a11y.copied" : "a11y.copy")
+                : "a11y.paste",
+            target: footerActionCopying ? .copy : .paste
+        ) {
+            if footerActionCopying {
+                model.copyOutput()
+            } else {
+                model.pasteInput()
+            }
+        }
+        .disabled(!footerActionCopying && !model.canPaste)
+    }
+
+    /// The footer pill reads as copy once there is a result, and as paste before
+    /// that. The button and the chip's copy of its ink both read this.
+    private var footerActionCopying: Bool {
+        !model.output.isEmpty
+    }
+
+    private var footerActionSymbol: String {
+        footerActionCopying
+            ? (model.copied ? "checkmark" : "document.on.document")
+            : "clipboard.fill"
+    }
+
+    private var footerActionTitle: String {
+        L10n.tr(footerActionCopying ? "copy" : "a11y.paste")
+    }
+
+    /// Something the trash can clear: typed text, a result, or a status.
+    private var hasContent: Bool {
+        !model.input.isEmpty || Self.showsResult(for: model)
+    }
+
+    /// The footer's trash, in the same glass disc as the more control.
+    private var clearButton: some View {
+        Button {
+            if let onClear {
+                onClear()
+            } else {
+                model.clearInput()
+            }
+        } label: {
+            ZStack {
+                Color.clear
+                    .frame(width: PanelFooterMetrics.disc, height: PanelFooterMetrics.disc)
+                PanelClearGlyph()
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(PanelPressStyle())
+        .background {
+            Color.clear
+                .droppyGlassControlChrome(shape: AnyShape(Circle()))
+        }
+        .chipTarget(.clear)
+        .arrowCursorRegion()
+        .a11y("a11y.clear")
+    }
+
     /// The drag handle. The panel's is the collapsed tab's silhouette laid on
     /// its side and filled with the card's own black, so it hangs off the
     /// card's bottom edge as one piece; the shelf's card cannot grow, so it
@@ -1285,8 +1800,7 @@ struct SidePanelContentView: View {
     }
 
     /// The shelf's handle: the same resting bar. A tap translates the text on
-    /// the opening card; a drag up or down pulls the bar with the pointer and
-    /// picks the card's height when it lets go: down grows, up shrinks.
+    /// the opening card.
     private var shelfGrip: some View {
         let out = gripOut
         return ZStack(alignment: .bottom) {
@@ -1299,43 +1813,15 @@ struct SidePanelContentView: View {
                     height: out ? Self.gripOutBar.height : Self.gripRestBar.height
                 )
                 .padding(.bottom, Self.shelfGripLift)
-                .offset(y: shelfGripPull)
         }
         .contentShape(Rectangle())
         .onHover { gripHover = $0 }
         .onTapGesture { onShelfGripTap?() }
-        .gesture(
-            DragGesture(minimumDistance: 6)
-                .onChanged { value in
-                    // The bar follows the pointer, so the handle answers the
-                    // hand before the card can move; the card only has whole
-                    // steps to give.
-                    shelfGripPull = min(
-                        max(value.translation.height, Self.shelfGripPullRange.lowerBound),
-                        Self.shelfGripPullRange.upperBound
-                    )
-                }
-                .onEnded { value in
-                    let dy = value.translation.height
-                    withAnimation(DroppyAnimation.notchOpen) { shelfGripPull = 0 }
-                    guard abs(dy) > abs(value.translation.width), abs(dy) >= 10 else { return }
-                    onShelfGripDrag?(dy < 0 ? .up : .down)
-                }
-        )
         .animation(DroppyAnimation.hover, value: out)
         .accessibilityElement()
-        .accessibilityLabel(L10n.tr(shelfStep == 0 ? "a11y.translate" : "a11y.shelfGrip"))
-        .accessibilityHint(
-            L10n.tr(shelfStep == 0 ? "a11y.shelfGripTranslateHint" : "a11y.shelfGripHint")
-        )
-        .accessibilityAdjustableAction { direction in
-            switch direction {
-            case .increment: onShelfGripDrag?(.down)
-            case .decrement: onShelfGripDrag?(.up)
-            @unknown default: break
-            }
-        }
-        .help(L10n.tr(shelfStep == 0 ? "a11y.translate" : "a11y.shelfGrip"))
+        .accessibilityLabel(L10n.tr("a11y.translate"))
+        .accessibilityHint(L10n.tr("a11y.shelfGripTranslateHint"))
+        .help(L10n.tr("a11y.translate"))
     }
 
     private var interactiveGrip: some View {
@@ -1382,7 +1868,9 @@ struct SidePanelContentView: View {
     /// A downward drag pulls the result box out of the input, stretches it to
     /// the card's cap and then folds the input away, so the result takes the
     /// whole face. An upward drag reverses that, and 24pt past the fold clears
-    /// the text. A click does nothing.
+    /// the text. On a card the display setting already folded, the pull grows
+    /// the result and the card instead of unfolding the original. A click does
+    /// nothing.
     private var gripGesture: some Gesture {
         // Global, not local: the tab moves down with the card it grows, so a
         // local translation would cancel the pointer's movement and stall.
@@ -1391,10 +1879,11 @@ struct SidePanelContentView: View {
                 let start = visibleResultHeight
                 var drag = gripDrag ?? GripDrag(
                     startHeight: start,
-                    foldStart: max(start - inputHeight * inputFold, Self.resultBoxHeight),
+                    foldStart: max(start - inputHeight * inputFold, restingResultHeight),
                     pulled: start,
                     deadband: 0,
-                    hasResult: !model.output.isEmpty
+                    hasResult: !model.output.isEmpty,
+                    foldsBySetting: showsAlone
                 )
                 if !drag.started {
                     let translation = value.translation
@@ -1428,13 +1917,19 @@ struct SidePanelContentView: View {
                        pulled: drag.pulled,
                        hasInput: model.canTranslate,
                        hasOutput: !model.output.isEmpty,
-                       isTranslating: model.status == .translating
+                       isTranslating: model.status == .translating,
+                       resting: restingResultHeight
                    ) {
                     drag.translateStarted = true
                     model.translate()
                 }
                 gripDrag = drag
-                applyGrip(drag.pulled, full: drag.hasResult, foldStart: drag.foldStart)
+                applyGrip(
+                    drag.pulled,
+                    full: drag.hasResult,
+                    foldStart: drag.foldStart,
+                    foldsBySetting: drag.foldsBySetting
+                )
             }
             .onEnded { _ in
                 guard let drag = gripDrag else { return }
@@ -1451,8 +1946,41 @@ struct SidePanelContentView: View {
     }
 
     private var header: some View {
-        headerRow
-            .frame(maxWidth: .infinity)
+        Group {
+            if showsResultPicker {
+                resultHeaderRow
+            } else {
+                headerRow
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The result page's own row, above its box: the target on the left and
+    /// the card's close on the right.
+    private var resultHeaderRow: some View {
+        HStack(spacing: 0) {
+            resultTargetMenu
+            Spacer(minLength: DroppySpacing.sm)
+            if let onClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
+                        .frame(width: PanelFooterMetrics.disc, height: PanelFooterMetrics.disc)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(PanelPressStyle())
+                .background {
+                    Color.clear
+                        .droppyGlassControlChrome(shape: AnyShape(Circle()))
+                }
+                .chipTarget(.close)
+                .arrowCursorRegion()
+                .a11y("panel.dismiss")
+            }
+        }
+        .frame(height: pillHeight)
     }
 
     /// A grouped shelf slot is narrower than the panel, so its labels and
@@ -1466,9 +1994,9 @@ struct SidePanelContentView: View {
     }
 
     /// The row capsule with the swap pocket cut through its glass, the disc,
-    /// the disc's glyph and then both menus. The chip that marks them lives in
-    /// the panel's own layer, above everything, so the glyph is drawn again
-    /// there while the chip covers it.
+    /// the disc's glyph and then both menus. The chip that marks them washes
+    /// the marked control and leaves its ink alone: the labels and the glyph
+    /// already stand on glass, so nothing is drawn twice.
     private var headerRow: some View {
         ZStack(alignment: .topLeading) {
             let capsule = AnyShape(Capsule(style: .continuous))
@@ -1490,12 +2018,6 @@ struct SidePanelContentView: View {
                     y: pillHeight - Self.buttonDiameter / 2
                 )
 
-            swapGlyph
-                .offset(
-                    x: (rowWidth - Self.buttonDiameter) / 2,
-                    y: pillHeight - Self.buttonDiameter / 2
-                )
-
             // On top so the labels stay crisp; they never overlap the disc.
             HStack(spacing: 0) {
                 LanguageMenu(
@@ -1511,15 +2033,11 @@ struct SidePanelContentView: View {
                     chipTarget: .source,
                     availableIDs: model.installedSourceIDs
                 )
-                // The mark keeps 3pt of rim inside the capsule's end and runs
-                // to the pocket's tangent, where the pocket's own curve leaves
-                // the same 3. It is the label's box, so the chip's ink lands
-                // on the label instead of 1.5pt off it.
-                .chipTarget(
-                    .source,
-                    insets: EdgeInsets(top: Self.rowMarkInset, leading: 0, bottom: Self.rowMarkInset, trailing: 0)
-                )
+                // The mark is the pill itself: the half's full height and out
+                // to the capsule's end, so the effect cannot read as a smaller
+                // capsule floating inside the row.
                 .padding(.leading, PanelFooterMetrics.chipInset)
+                .chipTarget(.source)
                 .frame(width: halfWidth)
 
                 // The pocket's width: both labels end on the red line.
@@ -1539,11 +2057,8 @@ struct SidePanelContentView: View {
                     chipTarget: .target,
                     availableIDs: model.installedTargetIDs
                 )
-                .chipTarget(
-                    .target,
-                    insets: EdgeInsets(top: Self.rowMarkInset, leading: 0, bottom: Self.rowMarkInset, trailing: 0)
-                )
                 .padding(.trailing, PanelFooterMetrics.chipInset)
+                .chipTarget(.target)
                 .frame(width: halfWidth)
             }
             .frame(width: rowWidth, height: pillHeight)
@@ -1551,24 +2066,20 @@ struct SidePanelContentView: View {
         .frame(width: rowWidth, height: pillHeight + Self.discRadius, alignment: .topLeading)
     }
 
-    /// The disc's glass and hit area. The glyph is separate so the chip can
-    /// draw it above its own glass. The glass stays put under the chip: hiding
-    /// it while the chip slides in leaves the disc empty for a frame, which
-    /// reads as a blink on the way to the seam.
+    /// The swap disc's glass, hit area and glyph. The glass stays put: the chip
+    /// only lights the disc's own circle, so the arrows never blink.
     private var swapButton: some View {
         Button {
             model.swapLanguages()
         } label: {
-            Color.clear
-                .frame(width: Self.buttonDiameter, height: Self.buttonDiameter)
-                .contentShape(Circle())
+            ZStack {
+                Color.clear
+                    .frame(width: Self.buttonDiameter, height: Self.buttonDiameter)
+                SidePanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
+            }
+            .contentShape(Circle())
         }
-        .buttonStyle(
-            PanelPressStyle(
-                hoverScale: SidePanelChipState.hoverScale,
-                pressScale: SidePanelChipState.pressScale
-            )
-        )
+        .buttonStyle(PanelPressStyle())
         .background {
             Color.clear
                 .droppyGlassControlChrome(shape: AnyShape(Circle()))
@@ -1578,16 +2089,10 @@ struct SidePanelContentView: View {
         .a11y("a11y.swap")
         .disabled(!model.canSwap)
     }
-
-    private var swapGlyph: some View {
-        SidePanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
-            .chipHidesInk(chip.covers(.swap))
-            .allowsHitTesting(false)
-    }
 }
 
-/// The swap disc's glyph. It is drawn apart from the disc's glass, so the
-/// chip can put it above the chip's own glass.
+/// The swap disc's glyph, drawn apart from the disc's glass: the hover mark is
+/// the disc alone, and the arrows never move with it.
 private struct SidePanelSwapGlyph: View {
     var spins: Int
     var enabled: Bool
@@ -1616,6 +2121,9 @@ private struct PanelResultTile: View {
     /// the moving edge still crosses it, the whole block blurs together, so
     /// the download never reads sharper than the sentence under it.
     var reveal: CGFloat = 1
+    /// The mount's box is already fitted to the status, so the block centres
+    /// in it instead of the resting box.
+    var fitsHeight = false
     @Environment(\.sidePanelChip) private var chip
 
     /// The block clears the edge's blur band at about three quarters open;
@@ -1629,124 +2137,97 @@ private struct PanelResultTile: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            ZStack(alignment: .topLeading) {
-                if !model.output.isEmpty {
-                    TranslationOutputScrollView(
-                        text: model.output,
-                        resetToken: model.outputScrollResetToken.uuidString,
-                        scrollerTopInset: 23,
-                        scrollerBottomInset: 48,
-                        textInset: 23,
-                        fontSize: SidePanelContentView.bodyFontSize
-                    )
-                } else if model.status == .translating {
-                    HStack(spacing: DroppySpacing.sm) {
-                        ProgressView().controlSize(.small)
-                        Text(L10n.tr("panel.translating"))
-                            .font(.system(size: SidePanelContentView.labelFontSize))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                            .cardTextShadow()
-                    }
+            if !model.output.isEmpty {
+                TranslationOutputScrollView(
+                    text: model.output,
+                    resetToken: model.outputScrollResetToken.uuidString,
+                    scrollerTopInset: SidePanelContentView.resultTextTop,
+                    scrollerBottomInset: 48,
+                    textInset: SidePanelContentView.resultTextTop,
+                    fontSize: SidePanelContentView.bodyFontSize
+                )
+            } else if model.status == .translating {
+                HStack(spacing: DroppySpacing.sm) {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.tr("panel.translating"))
+                        .font(.system(size: SidePanelContentView.labelFontSize))
+                        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                        .cardTextShadow()
+                }
+                .padding(.leading, 7)
+                .padding(.top, 23)
+            } else if model.notice == nil, model.status == .idle {
+                Text(L10n.outputPlaceholder(for: model.targetID))
+                    .font(.system(size: SidePanelContentView.labelFontSize))
+                    .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
+                    .cardTextShadow()
                     .padding(.leading, 7)
                     .padding(.top, 23)
-                } else if model.notice == nil, model.status == .idle {
-                    Text(L10n.outputPlaceholder(for: model.targetID))
-                        .font(.system(size: SidePanelContentView.labelFontSize))
-                        .foregroundStyle(AdaptiveColors.notchSurfaceTertiaryText)
-                        .cardTextShadow()
-                        .padding(.leading, 7)
-                        .padding(.top, 23)
-                } else if let message = model.notice ?? statusMessage(for: model) {
-                    // Top-aligned like the result text: a drag grows the box
-                    // downward, and a centred stack would drift up as it does.
-                    VStack(spacing: DroppySpacing.sm) {
-                        // The download takes the user to settings, so it sits on
-                        // top and the sentence under it says what it brings.
-                        if model.status == .needsDownload {
-                            Button {
-                                model.requestDownload()
-                            } label: {
-                                PanelDownloadLabel()
-                                    .chipHidesInk(chip?.covers(.download) == true)
-                            }
-                            .buttonStyle(DroppyAccentButtonStyle(size: .small))
-                            .disabled(model.prepare != nil)
-                            .chipTarget(SidePanelContentView.marksChip(reveal: reveal) ? .download : nil)
-                            .a11y("status.downloadShort")
+            } else if let message = model.notice ?? statusMessage(for: model) {
+                // Top-aligned like the result text: a drag grows the box
+                // downward, and a centred stack would drift up as it does.
+                VStack(spacing: DroppySpacing.sm) {
+                    // The download takes the user to settings, so it sits on
+                    // top and the sentence under it says what it brings.
+                    if model.status == .needsDownload {
+                        Button {
+                            model.requestDownload()
+                        } label: {
+                            PanelDownloadLabel()
                         }
-                        Text(message)
-                            .font(.system(size: SidePanelContentView.labelFontSize))
-                            .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
-                            .cardTextShadow()
-                            .multilineTextAlignment(.center)
-                        if model.canRetryTranslation {
-                            Button {
-                                model.retryTranslation()
-                            } label: {
-                                Text(L10n.tr("retry"))
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
-                                    .cardTextShadow()
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 8)
-                                    .contentShape(Capsule(style: .continuous))
-                            }
-                            .buttonStyle(
-                                PanelPressStyle(
-                                    hoverScale: SidePanelChipState.hoverScale,
-                                    pressScale: SidePanelChipState.pressScale
-                                )
-                            )
-                            .background {
-                                Color.clear
-                                    .droppyGlassControlChrome(
-                                        shape: AnyShape(Capsule(style: .continuous))
-                                    )
-                            }
-                            .arrowCursorRegion()
-                            .a11y("a11y.retry")
-                        }
+                        .buttonStyle(DroppyAccentButtonStyle(size: .small))
+                        .disabled(model.prepare != nil)
+                        .chipTarget(SidePanelContentView.marksChip(reveal: reveal) ? .download : nil)
+                        .a11y("status.downloadShort")
                     }
-                    // Centred in the resting box, then pinned to the tile's top:
-                    // a drag grows the box downward, so the stack must not ride
-                    // the new height and read as a slide.
-                    .frame(
-                        width: nil,
-                        height: SidePanelContentView.resultBoxHeight,
-                        alignment: .center
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .blur(radius: statusBlur)
+                    Text(message)
+                        .font(.system(size: SidePanelContentView.labelFontSize))
+                        .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
+                        .cardTextShadow()
+                        .multilineTextAlignment(.center)
+                    if model.canRetryTranslation {
+                        Button {
+                            model.retryTranslation()
+                        } label: {
+                            Text(L10n.tr("retry"))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
+                                .cardTextShadow()
+                        }
+                        .buttonStyle(DroppyQuietButtonStyle(size: .small))
+                        .arrowCursorRegion()
+                        .a11y("a11y.retry")
+                    }
                 }
+                // Centred in the resting box, then pinned to the tile's top:
+                // a drag grows the box downward, so the stack must not ride
+                // the new height and read as a slide. The floating panel's
+                // box is already the block's size, so it centres there.
+                .frame(
+                    width: nil,
+                    height: fitsHeight ? nil : SidePanelContentView.resultBoxHeight,
+                    alignment: .center
+                )
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: fitsHeight ? .center : .top
+                )
+                .blur(radius: statusBlur)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, PanelTileText.sideInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, PanelTileText.sideInset)
         // The same rim as every box: words fade as they reach the glass
         // instead of ending on a hard line.
         .panelTileEdgeFade()
-        .overlay(alignment: .bottomTrailing) {
-            if !model.output.isEmpty {
-                SidePanelPillButton(
-                    symbol: model.copied ? "checkmark" : "document.on.document",
-                    title: L10n.tr("copy"),
-                    a11yKey: "a11y.copy",
-                    target: .copy
-                ) {
-                    model.copyOutput()
-                }
-                .padding(.trailing, DroppySpacing.sm)
-                .padding(.bottom, DroppySpacing.sm)
-            }
-        }
         .animation(isDragging ? nil : DroppyAnimation.state, value: model.output.isEmpty)
     }
 }
 
-/// A named control inside a box: the glyph and the word, so it reads as an
-/// action rather than as another disc. The chip marks the pill and redraws
-/// this label above its glass.
+/// A named control in the footer: the glyph and the word, so it reads as an
+/// action rather than as another disc. The chip lights the pill and leaves the
+/// label on its own glass.
 private struct SidePanelPillButton: View {
     var symbol: String
     var title: String
@@ -1754,27 +2235,20 @@ private struct SidePanelPillButton: View {
     var target: SidePanelChipTarget
     var action: () -> Void
 
-    /// Matches the 28pt discs beside it: the kit's small pill pads its 12pt
-    /// label by 8pt top and bottom, which stands taller than the clear disc.
-    /// The glass is the same material; only the frame is this row's.
-    static let height: CGFloat = 28
+    /// The pill takes the disc's height, so the row shares one centreline and
+    /// the chip marks equal glass.
+    static let height: CGFloat = PanelFooterMetrics.disc
 
     @Environment(\.sidePanelChip) private var chip
 
     var body: some View {
         Button(action: action) {
             SidePanelPillLabel(symbol: symbol, text: title)
-                .chipHidesInk(chip?.covers(target) == true)
                 .padding(.horizontal, 9)
                 .frame(height: Self.height)
                 .contentShape(Capsule(style: .continuous))
         }
-        .buttonStyle(
-            PanelPressStyle(
-                hoverScale: SidePanelChipState.hoverScale,
-                pressScale: SidePanelChipState.pressScale
-            )
-        )
+        .buttonStyle(PanelPressStyle())
         .background {
             Color.clear
                 .droppyGlassControlChrome(shape: AnyShape(Capsule(style: .continuous)))
@@ -1785,7 +2259,7 @@ private struct SidePanelPillButton: View {
     }
 }
 
-/// The pill's ink, shared by the button and the chip.
+/// The pill's ink, drawn once on the button's own glass.
 private struct SidePanelPillLabel: View {
     var symbol: String
     var text: String
@@ -1801,46 +2275,16 @@ private struct SidePanelPillLabel: View {
     }
 }
 
-/// A disc inside a box. It keeps its own glass under the chip, which marks it
-/// like any other control, and hides its glyph while the chip draws that glyph
-/// above the mark.
-private struct SidePanelBoxButton: View {
-    var symbol: String
-    var a11yKey: String
-    var target: SidePanelChipTarget
-    var action: () -> Void
-
-    /// The disc's diameter; the chip's glyph copies its font from it.
-    static let diameter: CGFloat = 28
-
-    @Environment(\.sidePanelChip) private var chip
-
+/// The footer trash's glyph, on its own glass.
+private struct PanelClearGlyph: View {
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .chipHidesInk(chip?.covers(target) == true)
-        }
-        .buttonStyle(DroppyCircleButtonStyle(size: Self.diameter))
-        .chipTarget(target)
-        .arrowCursorRegion()
-        .a11y(a11yKey)
-    }
-}
-
-/// A disc's glyph, drawn again above the chip's glass. The kit's disc style
-/// sizes its glyph at 0.4 of the diameter in bold, so the copy matches.
-private struct SidePanelDiscGlyph: View {
-    var symbol: String
-
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: SidePanelBoxButton.diameter * 0.4, weight: .bold))
+        Image(systemName: "trash")
+            .font(.system(size: 12))
             .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
     }
 }
 
-/// The download pill's label. The chip draws this same view above its own
-/// glass, so the words never shift. The size is the kit's small pill.
+/// The download pill's label. The size is the kit's small pill.
 private struct PanelDownloadLabel: View {
     var body: some View {
         HStack(spacing: 5) {
@@ -1857,27 +2301,28 @@ private struct PanelDownloadLabel: View {
 /// the text and changes it in place, without a trip to settings.
 struct PanelEngineMenu: View {
     @ObservedObject var model: TranslateModel
-    /// A grouped shelf slot keeps only the engine capsule; the caption would
-    /// crowd the footer.
-    var showsCaption = true
-    @Environment(\.sidePanelChip) private var chip
+    /// A grouped shelf slot keeps only the translate mark; the engine's name
+    /// would push the paste and copy pills off the card.
+    var compact = false
 
     var body: some View {
-        HStack(spacing: DroppySpacing.xs) {
-            if showsCaption {
+        HStack(spacing: 4) {
+            if !compact {
+                // The mark stays outside the glass, so the control matches the
+                // footer's other buttons instead of reading as its own size.
                 Image(systemName: "translate")
-                    .font(.system(size: 12, weight: .medium))
-                Text(L10n.tr("panel.translateWith"))
-                    .font(.system(size: 12))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
                     .cardTextShadow()
+                    .accessibilityHidden(true)
             }
             capsule
         }
         .foregroundStyle(AdaptiveColors.notchSurfaceSecondaryText)
     }
 
-    /// The capsule holds only the engine in use, so it stays small next to
-    /// the caption; the chip marks this part alone.
+    /// The capsule holds only the engine's name; the translate mark sits
+    /// outside it and the chip marks this part alone.
     private var capsule: some View {
         Menu {
             ForEach(TranslationEngine.allCases) { engine in
@@ -1886,23 +2331,13 @@ struct PanelEngineMenu: View {
                 }
             }
         } label: {
-            PanelEngineLabel(model: model)
-                // The chip redraws this label above its own glass, so the two
-                // copies cross-fade instead of swapping.
-                .chipHidesInk(chip?.covers(.engine) ?? false)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
+            PanelEngineLabel(model: model, compact: compact, showsIcon: compact)
+                .padding(.horizontal, 8)
+                .frame(height: PanelFooterMetrics.engineHeight)
                 .contentShape(Capsule(style: .continuous))
         }
         .menuIndicator(.hidden)
-        .buttonStyle(
-            PanelPressStyle(
-                hoverScale: SidePanelChipState.hoverScale,
-                pressScale: SidePanelChipState.pressScale
-            )
-        )
-        // The glass sits outside the button's style, so the chip can draw the
-        // same ink above a glass that never moves with the pointer.
+        .buttonStyle(PanelPressStyle())
         .background {
             Color.clear
                 .droppyGlassControlChrome(shape: AnyShape(Capsule(style: .continuous)))
@@ -1930,17 +2365,30 @@ struct PanelEngineMenu: View {
     }
 }
 
-/// The engine capsule's ink. The chip draws this same view above its own
-/// glass, so the text never shifts by the menu's inset.
+/// The engine capsule's ink. The chip washes the capsule and leaves this view
+/// where the menu put it, so the text never shifts by the menu's inset.
 struct PanelEngineLabel: View {
     @ObservedObject var model: TranslateModel
+    /// The narrow footer keeps the translate mark alone.
+    var compact = false
+    /// The full footer draws the mark outside the glass; the narrow footer
+    /// keeps it inside, where it is the whole control.
+    var showsIcon = true
 
     var body: some View {
-        Text(Self.name(for: model))
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
-            .cardTextShadow()
-            .lineLimit(1)
+        HStack(spacing: 4) {
+            if showsIcon {
+                Image(systemName: "translate")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            if !compact {
+                Text(Self.name(for: model))
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+            }
+        }
+        .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(0.92))
+        .cardTextShadow()
     }
 
     /// The network engine speaks for its provider: "OpenAI" says more than
@@ -2087,62 +2535,14 @@ struct DiscCutShape: Shape {
     }
 }
 
-/// Every panel button lifts a little under the pointer, dips on press, and
-/// returns to the lift while the pointer stays.
+/// Every panel button dips on press, with the kit's clock. Hover is the chip's
+/// mark, or the glass's own wash.
 struct PanelPressStyle: ButtonStyle {
-    var hoverScale: CGFloat = 1.1
-    /// The scale while the button is held. The chip's ink dips with it; the
-    /// mark keeps its frame.
     var pressScale: CGFloat = 0.96
 
     func makeBody(configuration: Configuration) -> some View {
-        PanelPressBody(
-            configuration: configuration,
-            hoverScale: hoverScale,
-            pressScale: pressScale
-        )
-    }
-}
-
-private struct PanelPressBody: View {
-    let configuration: ButtonStyleConfiguration
-    let hoverScale: CGFloat
-    let pressScale: CGFloat
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
         configuration.label
-            .scaleEffect(
-                configuration.isPressed ? pressScale : (hovering && isEnabled ? hoverScale : 1)
-            )
+            .scaleEffect(configuration.isPressed ? pressScale : 1)
             .animation(DroppyAnimation.hoverQuick, value: configuration.isPressed)
-            .animation(DroppyAnimation.hoverQuick, value: hovering)
-            .onHover { hovering = $0 }
-    }
-}
-
-/// The chip's copy of a marked control's ink. It grows from rest when the mark
-/// arrives, so a marked button expands like a menu row instead of appearing
-/// already lifted.
-/// The ink above the chip's glass, lifted under the pointer and dipped while
-/// the control is held.
-struct PanelChipInk<Content: View>: View {
-    var scale: CGFloat
-    let content: Content
-    @State private var appeared = false
-
-    init(scale: CGFloat, @ViewBuilder content: () -> Content) {
-        self.scale = scale
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .scaleEffect(appeared ? scale : 1)
-            .animation(DroppyAnimation.hoverQuick, value: scale)
-            .onAppear {
-                withAnimation(DroppyAnimation.hoverQuick) { appeared = true }
-            }
     }
 }

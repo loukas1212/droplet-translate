@@ -36,8 +36,8 @@ func sourceLabel(for model: TranslateModel) -> String {
     return model.name(for: detected)
 }
 
-/// The language row's label. The edge panel's chip draws it again above its
-/// own glass, so the row and the chip share one label.
+/// The language row's label. The chip lights the half, so the words stay where
+/// the layout put them.
 struct PillLanguageLabel: View {
     var text: String
     /// The row's hovered side takes the theme highlight colour.
@@ -83,35 +83,46 @@ struct LanguageMenu: View {
     var alignment: Alignment = .center
     /// The air the panel's label keeps from its half's edges.
     var edgeInset: CGFloat = 0
-    /// The edge panel's chip marks this control; the chip draws the label
-    /// while it covers it.
+    /// The edge panel's chip lights this control. The label stands on the
+    /// row's glass, so the mark leaves the words where they are.
     var chipTarget: SidePanelChipTarget? = nil
     /// The languages whose pair is downloaded. Nil keeps every supported one.
     var availableIDs: Set<String>? = nil
-    /// A lone menu on a card has no row to read as one control, so it carries
-    /// a chevron; without it the label looks like plain text.
-    var showsChevron = false
+    /// Draws a card's lone picker at the footer's measured height, wearing the
+    /// row's own label so it reads as the same control as the row's languages.
+    var footerPill = false
 
-    /// The edge panel's row height, shared with its capsule background.
-    static let pillRowHeight: CGFloat = 34
+    /// The edge panel's row height, shared with its capsule background. It is
+    /// the footer's pill height, so a language pill and the Paste pill read as
+    /// one size.
+    static let pillRowHeight: CGFloat = PanelFooterMetrics.disc
 
     @Environment(\.sidePanelChip) private var chip
 
     var body: some View {
         // Keep AppKit's native menu tracking; only the trigger is styled.
-        if inPillRow {
-            menu
-                .menuIndicator(.hidden)
-                .buttonStyle(
-                    PanelPressStyle(
-                        hoverScale: SidePanelChipState.hoverScale,
-                        pressScale: SidePanelChipState.pressScale
-                    )
-                )
-        } else {
-            menu
-                .menuIndicator(.hidden)
-                .buttonStyle(DroppyQuietButtonStyle(size: .small))
+        Group {
+            if inPillRow {
+                menu
+                    .menuIndicator(.hidden)
+                    .buttonStyle(PanelPressStyle())
+            } else if footerPill {
+                menu
+                    .menuIndicator(.hidden)
+                    .buttonStyle(PanelPressStyle())
+                    // Outside the menu's own inset, so the glass is the copy
+                    // pill's height to the point rather than the kit's 30.3.
+                    .frame(height: PanelFooterMetrics.disc)
+                    .contentShape(Capsule(style: .continuous))
+                    .background {
+                        Color.clear
+                            .droppyGlassControlChrome(shape: AnyShape(Capsule(style: .continuous)))
+                    }
+            } else {
+                menu
+                    .menuIndicator(.hidden)
+                    .buttonStyle(DroppyQuietButtonStyle(size: .small))
+            }
         }
     }
 
@@ -154,13 +165,17 @@ struct LanguageMenu: View {
                     alignment: alignment,
                     edgeInset: edgeInset
                 )
-                .chipHidesInk(chip?.covers(chipTarget) == true)
-            } else if showsChevron {
-                // A lone menu on a card has no row around it, so the chevron
-                // is what says it is a picker. The chip draws this same label
-                // above its own glass.
-                PanelMenuLabel(text: label, fontSize: fontSize)
-                    .chipHidesInk(chip?.covers(chipTarget) == true)
+            } else if footerPill {
+                PillLanguageLabel(
+                    text: label,
+                    highlighted: highlighted,
+                    fontSize: fontSize,
+                    alignment: alignment,
+                    edgeInset: edgeInset
+                )
+                // The pill is as wide as its word, not the card: the label's
+                // stretch fills a half in the row, but here there is no half.
+                .fixedSize(horizontal: true, vertical: false)
             } else {
                 Text(label)
                     .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText.opacity(0.92))
@@ -170,31 +185,13 @@ struct LanguageMenu: View {
     }
 }
 
-/// The label of a language menu that stands on its own: the name and the
-/// chevron that says it opens a list.
-struct PanelMenuLabel: View {
-    var text: String
-    var fontSize: CGFloat
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Text(text)
-                .font(.system(size: fontSize, weight: .medium))
-            Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .bold))
-        }
-        .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText.opacity(0.92))
-        .cardTextShadow()
-    }
-}
-
 /// The panel footer's controls: the more disc and the air inside it.
 enum PanelFooterMetrics {
     /// The dots' box inside the disc, so they never touch its rim.
-    static let control: CGFloat = 28
+    static let control: CGFloat = 24
     /// The more disc's glass. The chip marks it edge to edge, so the hover is
     /// the button's own circle rather than a smaller mark inside it.
-    static let disc: CGFloat = 34
+    static let disc: CGFloat = 30
     /// The rim the dots keep inside the disc, and the rim a language label
     /// keeps around its mark.
     static var chipInset: CGFloat { (disc - control) / 2 }
@@ -202,10 +199,12 @@ enum PanelFooterMetrics {
     static let rim: CGFloat = 6
     /// The footer's height, shared so the menu's glass can start on the disc.
     static var footerHeight: CGFloat { disc + rim }
+    /// The engine capsule: a little shorter than the disc, so the footer's
+    /// trailing control reads as a chip rather than a second disc.
+    static let engineHeight: CGFloat = 24
 }
 
-/// The more disc's glyph. The edge panel's chip draws it again above its own
-/// glass, so the disc and the chip share one glyph.
+/// The more disc's glyph, drawn once on the button's own glass.
 struct PanelMoreGlyph: View {
     var iconFont: CGFloat
     /// Turns the dots upright while the menu is open, the way the disc would
@@ -366,7 +365,6 @@ struct ToolbarCapsule: View {
                         width: discDiameter - PanelFooterMetrics.chipInset * 2,
                         height: discDiameter - PanelFooterMetrics.chipInset * 2
                     )
-                    .chipHidesInk(chip?.covers(.more) ?? false)
                     .animation(DroppyAnimation.state, value: model.isToolbarExpanded)
             }
             .contentShape(Circle())
@@ -374,15 +372,9 @@ struct ToolbarCapsule: View {
                 onMoreHover?($0)
             }
         }
-        .buttonStyle(
-            PanelPressStyle(
-                hoverScale: SidePanelChipState.hoverScale,
-                pressScale: SidePanelChipState.pressScale
-            )
-        )
-        // The glass sits outside the button's style, so neither the pointer
-        // nor the press changes its size. The menu opens above the disc, so
-        // the disc keeps its glass under it.
+        .buttonStyle(PanelPressStyle())
+        // The glass sits outside the button's style so the chip marks the disc
+        // edge to edge on a frame that never moves.
         .background {
             Color.clear
                 .droppyGlassControlChrome(shape: AnyShape(Circle()))
@@ -549,6 +541,13 @@ struct PanelMoreMenu: View {
         .menuCapture, .menuSelect, .menuPin, .menuSettings
     ]
 
+    /// The menu's height over the footer: its rows, the air between them and
+    /// the inset on either edge.
+    static let height: CGFloat =
+        CGFloat(targets.count) * PanelToolRow.height
+        + CGFloat(targets.count - 1) * rowSpacing
+        + edgeInset * 2
+
     /// One column: the four tools stack over the more disc, like a menu.
     var width: CGFloat {
         PanelToolRow.width + Self.edgeInset * 2
@@ -602,72 +601,87 @@ struct PanelMoreMenu: View {
 
     private var tools: some View {
         VStack(spacing: Self.rowSpacing) {
-            captureTool
-            selectTool
-            pinTool
-            settingsTool
+            tool(.menuCapture, action: requestCapture)
+            tool(.menuSelect, action: selectAction)
+            tool(.menuPin, action: onPin ?? model.togglePin)
+            tool(.menuSettings, action: model.openSettings)
         }
     }
 
-    private var captureTool: some View {
-        PanelToolRow(
-            symbol: "camera.viewfinder",
-            label: L10n.tr("tool.capture"),
-            help: L10n.tr("a11y.capture"),
-            a11yKey: "a11y.capture",
-            busy: model.captureState == .recognizing,
-            disabled: model.captureState != .idle || !model.canCapture,
-            target: open ? .menuCapture : nil,
-            action: requestCapture
-        )
+    @ViewBuilder
+    private func tool(_ target: SidePanelChipTarget, action: @escaping () -> Void) -> some View {
+        if let content = Self.content(
+            for: target,
+            model: model,
+            pinned: pinned,
+            pinDisabled: onPin == nil ? !model.canPin : false
+        ) {
+            PanelToolRow(
+                content: content,
+                target: open ? target : nil,
+                action: action
+            )
+        }
     }
 
-    private var selectTool: some View {
-        PanelToolRow(
-            symbol: model.selectState == .armed ? "xmark" : "character.cursor.ibeam",
-            label: L10n.tr(model.selectState == .armed ? "tool.cancel" : "tool.select"),
-            help: L10n.tr(model.selectState == .armed ? "a11y.cancelSelect" : "a11y.select"),
-            a11yKey: model.selectState == .armed ? "a11y.cancelSelect" : "a11y.select",
-            busy: model.selectState == .pulling,
-            disabled: model.selectState == .pulling || (model.selectState != .armed && !model.canSelect),
-            target: open ? .menuSelect : nil,
-            action: {
-                if model.selectState == .armed {
-                    cancelSelection()
-                } else {
-                    requestSelection()
-                }
+    private var selectAction: () -> Void {
+        {
+            if model.selectState == .armed {
+                cancelSelection()
+            } else {
+                requestSelection()
             }
-        )
+        }
     }
 
-    private var pinTool: some View {
-        PanelToolRow(
-            symbol: showsPinned ? "pin.fill" : "pin",
-            label: L10n.tr(showsPinned ? "tool.unpin" : "tool.pin"),
-            help: L10n.tr("a11y.pin"),
-            a11yKey: "a11y.pin",
-            busy: false,
-            disabled: onPin == nil ? !model.canPin : false,
-            rotation: showsPinned ? 0 : 45,
-            target: open ? .menuPin : nil,
-            action: onPin ?? model.togglePin
-        )
-    }
-
-    private var showsPinned: Bool { pinned ?? model.isPinned }
-
-    private var settingsTool: some View {
-        PanelToolRow(
-            symbol: "gearshape",
-            label: L10n.tr("tool.settings"),
-            help: L10n.tr("a11y.settings"),
-            a11yKey: "a11y.settings",
-            busy: false,
-            disabled: false,
-            target: open ? .menuSettings : nil,
-            action: model.openSettings
-        )
+    /// The ink of one row, so the menu and the chip's copy above its glass
+    /// never drift apart.
+    static func content(
+        for target: SidePanelChipTarget,
+        model: TranslateModel,
+        pinned: Bool? = nil,
+        pinDisabled: Bool = false
+    ) -> PanelToolRowContent? {
+        let showsPinned = pinned ?? model.isPinned
+        switch target {
+        case .menuCapture:
+            return PanelToolRowContent(
+                symbol: "camera.viewfinder",
+                label: L10n.tr("tool.capture"),
+                help: L10n.tr("a11y.capture"),
+                a11yKey: "a11y.capture",
+                busy: model.captureState == .recognizing,
+                disabled: model.captureState != .idle || !model.canCapture
+            )
+        case .menuSelect:
+            let armed = model.selectState == .armed
+            return PanelToolRowContent(
+                symbol: armed ? "xmark" : "character.cursor.ibeam",
+                label: L10n.tr(armed ? "tool.cancel" : "tool.select"),
+                help: L10n.tr(armed ? "a11y.cancelSelect" : "a11y.select"),
+                a11yKey: armed ? "a11y.cancelSelect" : "a11y.select",
+                busy: model.selectState == .pulling,
+                disabled: model.selectState == .pulling || (!armed && !model.canSelect)
+            )
+        case .menuPin:
+            return PanelToolRowContent(
+                symbol: showsPinned ? "pin.fill" : "pin",
+                label: L10n.tr(showsPinned ? "tool.unpin" : "tool.pin"),
+                help: L10n.tr("a11y.pin"),
+                a11yKey: "a11y.pin",
+                disabled: pinDisabled,
+                rotation: showsPinned ? 0 : 45
+            )
+        case .menuSettings:
+            return PanelToolRowContent(
+                symbol: "gearshape",
+                label: L10n.tr("tool.settings"),
+                help: L10n.tr("a11y.settings"),
+                a11yKey: "a11y.settings"
+            )
+        default:
+            return nil
+        }
     }
 
     private var glassProgress: CGFloat {
@@ -712,16 +726,52 @@ private struct PanelMenuGlass: View, @MainActor Animatable {
     }
 }
 
-/// One tool in the panel's more menu: the glyph and its word in a row. The
-/// panel's chip covers the row, so the row reports its own frame.
-private struct PanelToolRow: View {
+/// What one row of the more menu draws: its glyph, its word and the state it
+/// shows. The menu's row and the chip's copy above the glass both read it.
+struct PanelToolRowContent {
     var symbol: String
     var label: String
     var help: String
     var a11yKey: String
-    var busy: Bool
-    var disabled: Bool
+    var busy = false
+    var disabled = false
     var rotation: Double = 0
+}
+
+/// The row's ink: the glyph and its word, laid out once. The row draws it small
+/// and dim; the chip draws the same view above its glass, so the two match.
+struct PanelToolRowLabel: View {
+    var content: PanelToolRowContent
+    var opacity: Double
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Group {
+                if content.busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: content.symbol)
+                        .rotationEffect(.degrees(content.rotation))
+                }
+            }
+            .font(.system(size: 13, weight: .medium))
+            .frame(width: 15)
+
+            Text(content.label)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(AdaptiveColors.primaryTextAuto.opacity(opacity))
+        .padding(.horizontal, 8)
+    }
+}
+
+/// One tool in the panel's more menu: the glyph and its word in a row. The
+/// chip marks the row in its own frame.
+private struct PanelToolRow: View {
+    var content: PanelToolRowContent
     /// Nil while the menu is folded: a hidden row must not publish a chip frame
     /// the pointer can find behind the card.
     var target: SidePanelChipTarget?
@@ -734,43 +784,21 @@ private struct PanelToolRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 7) {
-                Group {
-                    if busy {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: symbol)
-                            .rotationEffect(.degrees(rotation))
-                    }
-                }
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 15)
-
-                Text(label)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(
-                AdaptiveColors.primaryTextAuto
-                    .opacity(disabled ? 0.4 : (chip?.covers(target) == true ? 1 : 0.78))
+            PanelToolRowLabel(
+                content: content,
+                opacity: content.disabled
+                    ? 0.4
+                    : (target != nil && chip?.target == target ? 1 : 0.78)
             )
-            .padding(.horizontal, 8)
             .frame(width: Self.width, height: Self.height)
             .contentShape(Capsule())
         }
-        .buttonStyle(
-            PanelPressStyle(
-                hoverScale: SidePanelChipState.hoverScale,
-                pressScale: SidePanelChipState.pressScale
-            )
-        )
+        .buttonStyle(PanelPressStyle())
         .chipTarget(target)
         .arrowCursorRegion()
-        .help(help)
-        .a11y(a11yKey)
-        .disabled(disabled)
+        .help(content.help)
+        .a11y(content.a11yKey)
+        .disabled(content.disabled)
     }
 }
 
@@ -783,6 +811,7 @@ struct TileIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
+                .frame(width: diameter, height: diameter)
         }
         .translateCircle(diameter: diameter)
         .a11y(a11yKey)
@@ -1000,51 +1029,6 @@ struct GlassPocketMask: View {
     }
 }
 
-private struct TileBackground: View {
-    var notch: SeamNotchShape.Edge?
-    var titleTab: Bool = false
-    var notchRadius: CGFloat = 24
-    /// `glass` draws the box's frosted pane; false keeps the flat raised fill.
-    var glass = false
-    /// Overrides the shared tile radius; the edge panel asks for 24.
-    var cornerRadius: CGFloat?
-    /// The edge panel's swap pocket, cut through the glass.
-    var pocket: SidePanelBoxCut?
-
-    private var shape: AnyShape {
-        if notch != nil || titleTab {
-            return AnyShape(SeamNotchShape(edge: notch, titleTab: titleTab, notchRadius: notchRadius))
-        } else {
-            return AnyShape(
-                RoundedRectangle(
-                    cornerRadius: cornerRadius ?? TileMetrics.cornerRadius,
-                    style: .continuous
-                )
-            )
-        }
-    }
-
-    var body: some View {
-        if glass {
-            if let pocket {
-                FrostedTileSurface(shape: shape)
-                    .mask {
-                        GlassPocketMask(
-                            shape: shape,
-                            centreY: pocket.centreY,
-                            radius: pocket.radius,
-                            topFillet: pocket.fillet
-                        )
-                    }
-            } else {
-                FrostedTileSurface(shape: shape)
-            }
-        } else {
-            shape.fill(AdaptiveColors.notchSurfaceCardFill)
-        }
-    }
-}
-
 /// The air and the edge fade every box's words share: the shelf's input, the
 /// edge panel's input and result, and the floating panel's two boxes.
 enum PanelTileText {
@@ -1085,63 +1069,37 @@ extension View {
     }
 }
 
-/// A box's frosted pane.
-///
-/// The kit's glass control draws clear glass, which needs something bright
-/// behind it. A box sits on the card's black, so that glass came out invisible
-/// and only the words showed. The material keeps the pane visible on any
-/// surface, the shelf's included.
-struct FrostedTileSurface: View {
-    var shape: AnyShape
+/// The short capsule that parts the original from its translation, centred in
+/// the gap the two boxes already leave.
+struct PanelSeamDivider: View {
+    var gap: CGFloat
+
+    /// A 3pt dash still reads as a seam, and the centre is counted with it.
+    private static let thickness: CGFloat = 3
 
     var body: some View {
-        shape
-            .fill(.ultraThinMaterial)
-            .sidePanelTileBevel(shape: shape)
-    }
-}
-
-/// The light a glass box catches on its top edge and the shade it loses at the
-/// bottom: the same lift the card's rim gives, so the boxes inside read as
-/// raised panes instead of flat cut-outs.
-struct SidePanelTileBevel: ViewModifier {
-    let shape: AnyShape
-
-    func body(content: Content) -> some View {
-        content.overlay {
-            shape
-                .stroke(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .white.opacity(0.18), location: 0),
-                            .init(color: .clear, location: 0.55)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 1
-                )
-                .clipShape(shape)
-        }
-    }
-}
-
-extension View {
-    func sidePanelTileBevel(shape: AnyShape) -> some View {
-        modifier(SidePanelTileBevel(shape: shape))
+        Capsule(style: .continuous)
+            .fill(AdaptiveColors.overlayAuto(0.18))
+            .frame(width: 250, height: Self.thickness)
+            .frame(maxWidth: .infinity)
+            // The overlay pins the capsule's bottom to the box's edge, so half
+            // the gap plus half the capsule puts its centre in the gap.
+            .offset(y: (gap + Self.thickness) / 2)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
 /// The dark halo under the card's text. Over clear glass the wallpaper shows
 /// through the card, and a white glyph alone loses its edge on a bright one.
 enum CardTextShadow {
-    static let color = Color.black.opacity(0.65)
-    static let radius: CGFloat = 2
-    static let y: CGFloat = 0.5
+    static let color = Color.black.opacity(0.95)
+    static let radius: CGFloat = 4
+    static let y: CGFloat = 1.5
 
     static var nsShadow: NSShadow {
         let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.65)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.95)
         shadow.shadowBlurRadius = radius
         shadow.shadowOffset = NSSize(width: 0, height: -y)
         return shadow
@@ -1237,30 +1195,6 @@ extension View {
 
     func cardTextShadow() -> some View {
         shadow(color: CardTextShadow.color, radius: CardTextShadow.radius, y: CardTextShadow.y)
-    }
-
-    /// A raised surface inside the widget, never a frame around it: the root
-    /// stays bare. `notch` carves the swap pocket; `titleTab` the title dip.
-    /// `glass` draws the box as a frosted pane instead of the flat fill.
-    func tile(
-        notch: SeamNotchShape.Edge? = nil,
-        titleTab: Bool = false,
-        notchRadius: CGFloat = 24,
-        glass: Bool = false,
-        cornerRadius: CGFloat? = nil,
-        pocket: SidePanelBoxCut? = nil
-    ) -> some View {
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(
-                TileBackground(
-                    notch: notch,
-                    titleTab: titleTab,
-                    notchRadius: notchRadius,
-                    glass: glass,
-                    cornerRadius: cornerRadius,
-                    pocket: pocket
-                )
-            )
     }
 
     /// The language row's raised hover capsule, reused on the panel's boxes.

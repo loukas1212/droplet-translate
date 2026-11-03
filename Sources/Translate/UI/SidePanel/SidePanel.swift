@@ -164,17 +164,18 @@ final class SidePanel: NSPanel {
     static let windowHeight = hoverHeight
 
     /// The pressed tab is the canvas the translation result will be laid out in,
-    /// so it takes the result panel's width. Its height follows the text box;
-    /// the extra on each side is the flare that melts each edge-side corner
-    /// into the screen edge.
-    static let expandedWidth: CGFloat = 460
+    /// so it takes the boxes' width and the shelf's side margin. Its height
+    /// follows the text box; the extra on each side is the flare that melts
+    /// each edge-side corner into the screen edge.
+    static let expandedWidth: CGFloat =
+        SidePanelContentView.boxWidth + SidePanelContentView.sideInset * 2
 
     /// The largest the card gets: a full box plus its chrome and the grip's
     /// strip. Also the drag clamp, so the card never leaves the screen.
     static var expandedSize: NSSize {
         NSSize(
             width: expandedWidth,
-            height: windowHeight(forBody: SidePanelContentView.maxPanelBodyHeight)
+            height: windowHeight(forBody: SidePanelContentView.floatingMaxBodyHeight)
         )
     }
 
@@ -211,7 +212,7 @@ final class SidePanel: NSPanel {
     fileprivate var isExpanded = false
     /// The card body. The content reports what its text box needs; the window
     /// follows, clamped to the box's own limits.
-    private var bodyHeight = SidePanelContentView.panelMinBodyHeight
+    private var bodyHeight = SidePanelContentView.floatingMinBodyHeight
     /// The body height the card is easing toward; nil once it rests.
     private var bodyHeightTarget: CGFloat?
     private var centreY: CGFloat = 0
@@ -222,8 +223,8 @@ final class SidePanel: NSPanel {
     private var dragStart: (mouseY: CGFloat, centreY: CGFloat)?
     private let tabView = SidePanelTabView()
     private var model: TranslateModel?
-    /// The sliding chip that marks the control under the pointer. The panel
-    /// owns it, so it can bloom the chip over a held control.
+    /// The sliding mark that lights the control under the pointer. The panel
+    /// owns it, so it can light a held control.
     private let chip = SidePanelChipState()
     /// The handle's amount, shared with the content so its mark rides the lobe.
     private let grip = SidePanelGripState()
@@ -658,6 +659,32 @@ final class SidePanel: NSPanel {
         expand(takingKey: false)
     }
 
+    /// Opens the card on its empty box and puts the caret in it: the shortcut
+    /// asks for a place to type. A result never takes the keyboard from the app
+    /// the user is in, so only this path asks for the key.
+    func revealEmpty() {
+        guard isActive, model != nil else { return }
+        orderFrontRegardless()
+        makeClickable()
+        expand(takingKey: true)
+        focusEditor()
+    }
+
+    /// The card is built on its first open, so the editor can appear a frame or
+    /// two after the window takes the key.
+    private func focusEditor() {
+        Task { @MainActor [weak self] in
+            for _ in 0..<5 {
+                guard let self, self.isExpanded else { return }
+                if let editor = self.contentView.flatMap({ firstEditor(in: $0) }) {
+                    if self.firstResponder === editor { return }
+                    self.makeFirstResponder(editor)
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
     /// The panel is a launcher window: it needs the keyboard for its text box,
     /// and hands the foreground back when it folds away.
     private func takeKey() {
@@ -684,7 +711,12 @@ final class SidePanel: NSPanel {
                     requestCapture: requestCapture,
                     requestSelection: requestSelection,
                     cancelSelection: cancelSelection,
-                    boxFloor: SidePanelContentView.panelBoxFloor,
+                    boxFloor: SidePanelContentView.shelfBoxFloor,
+                    boxCap: SidePanelContentView.floatingBoxCap,
+                    translationOnly: !model.resultPage.showsOriginal,
+                    fitsResult: true,
+                    maxBodyHeight: SidePanelContentView.floatingMaxBodyHeight,
+                    onClose: { [weak self] in self?.collapse(respectingPin: false) },
                     onGripOut: { [weak self] out in self?.setGripOut(out) },
                     onPin: { [weak self] in self?.togglePin() },
                     onBodyHeight: { [weak self] height, animated in
@@ -715,8 +747,8 @@ final class SidePanel: NSPanel {
     /// of snapping it.
     private func applyBodyHeight(_ height: CGFloat, animated: Bool) {
         let clamped = min(
-            max(height, SidePanelContentView.panelMinBodyHeight),
-            SidePanelContentView.maxPanelBodyHeight
+            max(height, SidePanelContentView.floatingMinBodyHeight),
+            SidePanelContentView.floatingMaxBodyHeight
         )
         guard abs(clamped - (bodyHeightTarget ?? bodyHeight)) > 0.5 else { return }
         // The first layout, a grip drag and Reduce Motion all land at once:
@@ -734,8 +766,8 @@ final class SidePanel: NSPanel {
         startMotion()
     }
 
-    /// The island's own clearance: its 16pt shelf content inset plus the 1.5pt
-    /// widget slot, so the card's corners stay concentric with the shell.
+    /// The panels keep the shelf widget's side margin and the island's
+    /// vertical clearance, so their boxes sit where the shelf's do.
     ///
     /// The content hangs off the card's top-right corner, not its top-left: the
     /// window grows out of the screen edge, so the words stay where they will
@@ -743,13 +775,13 @@ final class SidePanel: NSPanel {
     /// with the growing edge and read as the text moving, not the panel.
     private func layoutContent() {
         guard let content else { return }
-        let inset = SidePanelContentView.inset
-        let width = Self.expandedWidth - inset * 2
+        let sideInset = SidePanelContentView.sideInset
+        let width = Self.expandedWidth - sideInset * 2
         // The content hangs from the screen edge, so it stays put while the
         // card grows over it; the free edge is the one that travels.
         content.frame = NSRect(
-            x: side == .right ? tabView.bounds.width - inset - width : inset,
-            y: SidePanelCardShape.filletRadius + inset,
+            x: side == .right ? tabView.bounds.width - sideInset - width : sideInset,
+            y: SidePanelCardShape.filletRadius + SidePanelContentView.inset,
             width: width,
             height: SidePanelContentView.contentHeight(forBody: bodyHeight)
         )
@@ -1310,6 +1342,7 @@ final class SidePanel: NSPanel {
     fileprivate func endDrag() {
         dragStart = nil
     }
+
 }
 
 /// The card's surface layer, under the card's marks and over its black.

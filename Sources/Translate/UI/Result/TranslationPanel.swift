@@ -29,7 +29,7 @@ final class TranslationPanel: NSPanel {
     private let chip = SidePanelChipState()
     private let pin = SidePanelPinState()
     /// The card body the content asked for.
-    private var bodyHeight = SidePanelContentView.panelMinBodyHeight
+    private var bodyHeight = SidePanelContentView.floatingMinBodyHeight
     /// Whether the panel opened from its shortcut for the user to type in. A
     /// card opened on a result leaves the keyboard where it is.
     private var focusesEditor = false
@@ -65,9 +65,11 @@ final class TranslationPanel: NSPanel {
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
-        // The card is the window: a drag on its face moves the panel, as it
-        // did before the handle existed.
-        isMovableByWindowBackground = true
+        // The card is the window: a drag on its face moves the panel. AppKit's
+        // own background drag never moved this panel (the drag events arrived
+        // and the frame stayed put), so `sendEvent` moves it itself. The boxes,
+        // their words and the controls keep their own presses.
+        isMovableByWindowBackground = false
         hidesOnDeactivate = false
         becomesKeyOnlyIfNeeded = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -97,6 +99,122 @@ final class TranslationPanel: NSPanel {
             name: NSWindow.didBecomeKeyNotification,
             object: self
         )
+        try? FileManager.default.removeItem(atPath: Self.dragLogPath)
+        Self.dragLog("init")
+    }
+
+    // MARK: - Drag diagnosis (temporary)
+
+    private static let dragLogPath = "/tmp/TranslateDrag.log"
+
+    /// Shows what the panel does on a drag even when the unified log misses it.
+    private static func dragLog(_ line: String) {
+        let text = String(format: "%.3f ", Date().timeIntervalSince1970) + line + "\n"
+        guard let data = text.data(using: .utf8) else { return }
+        let url = URL(fileURLWithPath: dragLogPath)
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    /// A press on the card's face makes the panel follow the pointer for as
+    /// long as the button is held. The pointer is read on a timer instead of
+    /// waiting for drag events: on parts of the card SwiftUI takes the press
+    /// and the drag events never reach the window, but the button state and
+    /// the pointer position are always there.
+    private var dragAnchor: NSPoint?
+    /// The panel's origin at the press. The panel is placed at this plus how
+    /// far the pointer has gone, so nothing else that nudges the frame can
+    /// make the drag drift from the pointer.
+    private var dragOrigin = NSPoint.zero
+    private var dragMoved = false
+    private var dragTimer: Timer?
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            let hit = contentView?.hitTest(event.locationInWindow)
+            let canDrag = Self.canDragFrom(hit)
+            Self.dragLog(
+                "down hit=\(hit.map { String(describing: type(of: $0)) } ?? "nil") "
+                    + "canDrag=\(canDrag) bloom=\(bloomLink != nil) "
+                    + "key=\(isKeyWindow) active=\(NSApp.isActive)"
+            )
+            if canDrag { beginDrag() } else { endDrag() }
+        case .leftMouseDragged:
+            followPointer(via: "event")
+        case .leftMouseUp:
+            endDrag()
+        default:
+            break
+        }
+        super.sendEvent(event)
+    }
+
+    private func beginDrag() {
+        endDrag()
+        let mouse = NSEvent.mouseLocation
+        dragAnchor = mouse
+        dragOrigin = frame.origin
+        dragMoved = false
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.dragTick() }
+        }
+        // Common modes, so it keeps running while AppKit or SwiftUI is
+        // tracking the press.
+        RunLoop.main.add(timer, forMode: .common)
+        dragTimer = timer
+    }
+
+    private func endDrag() {
+        if dragMoved, let anchor = dragAnchor {
+            let now = NSEvent.mouseLocation
+            Self.dragLog(
+                "drag end pointer=(\(Int(now.x - anchor.x)), \(Int(now.y - anchor.y))) "
+                    + "window=(\(Int(frame.origin.x - dragOrigin.x)), "
+                    + "\(Int(frame.origin.y - dragOrigin.y)))"
+            )
+        }
+        dragTimer?.invalidate()
+        dragTimer = nil
+        dragAnchor = nil
+        dragMoved = false
+    }
+
+    private func dragTick() {
+        guard dragAnchor != nil else { endDrag(); return }
+        // The button is the truth: a release the window never saw still ends
+        // the drag.
+        guard NSEvent.pressedMouseButtons & 1 != 0 else { endDrag(); return }
+        followPointer(via: "poll")
+    }
+
+    private func followPointer(via source: String) {
+        guard let anchor = dragAnchor, bloomLink == nil else { return }
+        let now = NSEvent.mouseLocation
+        let dx = now.x - anchor.x
+        let dy = now.y - anchor.y
+        if !dragMoved {
+            guard abs(dx) + abs(dy) > 3 else { return }
+            dragMoved = true
+            Self.dragLog("drag start via=\(source)")
+        }
+        setFrameOrigin(NSPoint(x: dragOrigin.x + dx, y: dragOrigin.y + dy))
+    }
+
+    /// Text boxes and AppKit controls keep their own presses; everything else
+    /// on the card drags the panel.
+    private static func canDragFrom(_ view: NSView?) -> Bool {
+        var current = view
+        while let v = current {
+            if v is NSTextView || v is NSScrollView || v is NSControl { return false }
+            current = v.superview
+        }
+        return true
     }
 
     override var canBecomeKey: Bool { true }
@@ -144,9 +262,19 @@ final class TranslationPanel: NSPanel {
             if !pinned { installMonitor() }
             return
         }
+        // The card ends where the chosen content does: both boxes, or the
+        // translation alone. Either way the result box is fitted to its words,
+        // and stays level with the input while both are shown.
+        let alone = !showsOriginal
+        let box = showsOriginal ? SidePanelContentView.floatingBoxFloor : 0
         bodyHeight = SidePanelContentView.bodyHeight(
-            forBox: SidePanelContentView.panelBoxFloor,
-            result: true
+            forBox: box,
+            result: true,
+            resultHeight: SidePanelContentView.floatingFittedResultHeight(
+                text: translated,
+                alone: alone,
+                matching: box
+            )
         )
         display(
             content: floatingContent(model: model),
@@ -175,7 +303,7 @@ final class TranslationPanel: NSPanel {
             installMonitor()
             return
         }
-        bodyHeight = SidePanelContentView.panelMinBodyHeight
+        bodyHeight = SidePanelContentView.floatingMinBodyHeight
         display(
             content: floatingContent(model: model),
             width: SidePanel.expandedWidth,
@@ -213,7 +341,7 @@ final class TranslationPanel: NSPanel {
             )),
             width: 320,
             height: nil,
-            minimumHeight: 110,
+            minimumHeight: 0,
             near: rect,
             on: screen
         )
@@ -243,6 +371,7 @@ final class TranslationPanel: NSPanel {
     }
 
     private func finishClosing() {
+        endDrag()
         stopBloom()
         wearsCard = false
         if activation != nil {
@@ -285,6 +414,7 @@ final class TranslationPanel: NSPanel {
 
     @objc private func windowDidChangeKey() {
         updateKeyAppearance()
+        Self.dragLog("key key=\(isKeyWindow) active=\(NSApp.isActive)")
     }
 
     /// The panel keeps one face while it is open: unpinning must not hand it
@@ -303,7 +433,8 @@ final class TranslationPanel: NSPanel {
     /// language row, the boxes, the handle, the more menu, the footer — comes
     /// from this one view, so the two surfaces cannot drift apart.
     private func floatingContent(model: TranslateModel) -> AnyView {
-        AnyView(
+        let translationOnly = !model.resultPage.showsOriginal
+        return AnyView(
             FloatingPanelBody(
                 model: model,
                 chip: chip,
@@ -317,7 +448,8 @@ final class TranslationPanel: NSPanel {
                     Task { @MainActor in
                         self?.applyBodyHeight(height, animated: animated)
                     }
-                }
+                },
+                translationOnly: translationOnly
             )
             .background(
                 Button("") { [weak self] in self?.closePanel() }
@@ -330,14 +462,21 @@ final class TranslationPanel: NSPanel {
         )
     }
 
+    /// The body the window takes for a height the content reports, between
+    /// the empty card's floor and the tallest card. The folded card ends at
+    /// its fitted result, which is above this floor.
+    static func clampedBodyHeight(_ height: CGFloat) -> CGFloat {
+        min(
+            max(height, SidePanelContentView.floatingMinBodyHeight),
+            SidePanelContentView.floatingMaxBodyHeight
+        )
+    }
+
     /// The content owns the card's height: it reports what the box and the
     /// result need, and the window follows, keeping its top edge so the line
     /// being typed stays where the eye left it.
     private func applyBodyHeight(_ height: CGFloat, animated: Bool) {
-        let clamped = min(
-            max(height, SidePanelContentView.panelMinBodyHeight),
-            SidePanelContentView.maxPanelBodyHeight
-        )
+        let clamped = Self.clampedBodyHeight(height)
         guard abs(clamped - bodyHeight) > 0.5 else { return }
         bodyHeight = clamped
         guard isVisible else { return }
@@ -412,6 +551,14 @@ final class TranslationPanel: NSPanel {
 
         let card = PanelCardView(frame: hosting.frame)
         card.wantsLayer = true
+        // A clear window lets a click fall through its fully transparent
+        // pixels to the app behind, so the card's glass alone does not hold a
+        // press. A fill too faint to see, in the card's own outline, keeps
+        // every point of the card hit-able. It scales with the card in the
+        // bloom.
+        card.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.01).cgColor
+        card.layer?.cornerRadius = panelRadius
+        card.layer?.cornerCurve = .continuous
         card.addSubview(glass)
         card.addSubview(hosting)
         self.cardView = card
@@ -491,6 +638,11 @@ final class TranslationPanel: NSPanel {
         if focusesEditor { takeEditorFocus() }
         if opening { startBloom(closing: false) }
         updateKeyAppearance()
+        Self.dragLog(
+            "display frame=\(frame) visible=\(isVisible) key=\(isKeyWindow) "
+                + "active=\(NSApp.isActive) movable=\(isMovable) "
+                + "background=\(isMovableByWindowBackground) ignores=\(ignoresMouseEvents)"
+        )
     }
 
     // MARK: - Bloom
@@ -671,7 +823,7 @@ final class TranslationPanel: NSPanel {
             for _ in 0..<5 {
                 guard let self, self.focusesEditor, self.isVisible else { return }
                 if let content = self.contentView,
-                   let editor = Self.firstEditor(in: content) {
+                   let editor = firstEditor(in: content) {
                     if self.firstResponder === editor { return }
                     self.makeFirstResponder(editor)
                 }
@@ -679,27 +831,14 @@ final class TranslationPanel: NSPanel {
             }
         }
     }
-
-    /// The input box's editor: the first editable text view on the card. The
-    /// menus' labels are not editable.
-    private static func firstEditor(in view: NSView) -> NSTextView? {
-        if let text = view as? NSTextView, text.isEditable { return text }
-        for subview in view.subviews {
-            if let found = firstEditor(in: subview) { return found }
-        }
-        return nil
-    }
 }
 
 // MARK: - Content
 
 let panelRadius: CGFloat = 44
 
-private let panelTileRadius: CGFloat = 29
-
 /// The floating panel's content: the edge panel's card, drawn in the panel's
-/// own rounded outline. The settings picture draws this same view, so what the
-/// user previews is the card the shortcut opens.
+/// own rounded outline, and the shortcut opens the same card drawn in it.
 struct FloatingPanelBody: View {
     @ObservedObject var model: TranslateModel
     @ObservedObject var chip: SidePanelChipState
@@ -710,6 +849,9 @@ struct FloatingPanelBody: View {
     var onClose: () -> Void = {}
     var onPin: () -> Void = {}
     var onBodyHeight: (CGFloat, Bool) -> Void = { _, _ in }
+    /// The content setting asks for the translation alone: the card starts
+    /// with the original folded away and the result in its place.
+    var translationOnly = false
 
     var body: some View {
         SidePanelContentView(
@@ -719,12 +861,18 @@ struct FloatingPanelBody: View {
             requestCapture: requestCapture,
             requestSelection: requestSelection,
             cancelSelection: cancelSelection,
-            boxFloor: SidePanelContentView.panelBoxFloor,
+            boxFloor: SidePanelContentView.floatingBoxFloor,
+            boxCap: SidePanelContentView.floatingBoxCap,
+            translationOnly: translationOnly,
+            fitsResult: true,
             showsGrip: false,
+            maxBodyHeight: SidePanelContentView.floatingMaxBodyHeight,
+            onClose: onClose,
             onPin: onPin,
             onBodyHeight: onBodyHeight
         )
-        .padding(SidePanelContentView.inset)
+        .padding(.horizontal, SidePanelContentView.sideInset)
+        .padding(.vertical, SidePanelContentView.inset)
     }
 }
 
@@ -734,17 +882,13 @@ private let panelInset = DroppySpacing.lg
 ///
 /// The live panel sits on the host's own surface for the theme in Droppy
 /// (`SidePanelCardSurface`), the same card the shelf and the edge panel wear.
-/// The settings picture puts that surface over the droplet's black, so a glass
-/// theme melts from black the way it does on the desktop, instead of melting
-/// into the settings page behind it.
+/// The window draws the surface in its own layer, so the card's glass stays
+/// one layer under the boxes and the bloom scales it with the content.
 enum PanelBackdrop {
-    /// The surface is drawn in the view, as in the settings picture.
+    /// The surface is drawn in the view.
     case hostGlass
-    /// The surface is drawn over the droplet's black.
-    case hostGlassOnBlack
     /// The window draws the surface in its own layer behind the content, as
-    /// the edge panel does, so the card's themed glass stays one layer under
-    /// the boxes and the bloom scales it with the content.
+    /// the edge panel does.
     case windowSurface
 
     /// True when the view draws the card's surface itself.
@@ -762,10 +906,6 @@ private struct PanelSurfaceBackdrop: View {
         switch backdrop {
         case .hostGlass:
             SidePanelCardSurface(shape: shape)
-        case .hostGlassOnBlack:
-            shape
-                .fill(.black)
-                .overlay { SidePanelCardSurface(shape: shape) }
         case .windowSurface:
             Color.clear
         }
@@ -834,8 +974,9 @@ struct ResultWindowView: View {
     /// The card with the original above the result. The measured card is
     /// 273pt; 280 is the nearest round floor.
     static let minimumHeightWithOriginal: CGFloat = 280
-    /// The air between the two boxes, as the shelf's steps space them.
-    static let boxGap: CGFloat = DroppySpacing.xsm
+    /// The air between the two boxes, as the shelf's steps space them. Odd, so
+    /// the 3pt seam splits it into whole points on a 1x display.
+    static let boxGap: CGFloat = 9
     /// The seam the language row cuts for the swap disc: the air under the
     /// labels' pill, the fillet that runs from the cut, and the air each label
     /// keeps from its half's edge.
@@ -904,8 +1045,10 @@ struct ResultWindowView: View {
     @State private var pointerOnMore = false
     @State private var pointerInMenu = false
     @State private var moreCloseTask: Task<Void, Never>?
-    /// One piece of glass that slides to the control under the pointer.
+    /// One light that slides to the control under the pointer.
     @StateObject private var chip: SidePanelChipState
+    /// The mark's spring is ours; Reduce Motion falls back to the kit's ease.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         model: TranslateModel,
@@ -949,7 +1092,10 @@ struct ResultWindowView: View {
             VStack(spacing: 0) {
                 if showsLanguageRow {
                     languageRow
-                    sourceTile
+                    sourceWords
+                        .overlay(alignment: .bottom) {
+                            PanelSeamDivider(gap: Self.boxGap)
+                        }
                         .padding(.top, -(SidePanelContentView.discRadius - Self.rowGap))
                         .padding(.bottom, Self.boxGap)
                 }
@@ -1014,16 +1160,6 @@ struct ResultWindowView: View {
         }
     }
 
-    /// The glass every box sits on, bevel included: without the top rim the
-    /// pane disappears into the card.
-    private var tileGlass: some View {
-        FrostedTileSurface(shape: AnyShape(tileShape))
-    }
-
-    private var tileShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: panelTileRadius, style: .continuous)
-    }
-
     /// The card with an original shows the shelf's language row: the two
     /// labels in one capsule, the swap disc in the seam it cuts, and the
     /// original's box tucked under it.
@@ -1054,8 +1190,6 @@ struct ResultWindowView: View {
                     )
                 }
             swapButton
-                .offset(x: (rowWidth - button) / 2, y: LanguageMenu.pillRowHeight - button / 2)
-            swapGlyph
                 .offset(x: (rowWidth - button) / 2, y: LanguageMenu.pillRowHeight - button / 2)
             HStack(spacing: 0) {
                 LanguageMenu(
@@ -1125,19 +1259,17 @@ struct ResultWindowView: View {
         Button {
             model.swapLanguages()
         } label: {
-            Color.clear
-                .frame(
-                    width: SidePanelContentView.buttonDiameter,
-                    height: SidePanelContentView.buttonDiameter
-                )
-                .contentShape(Circle())
+            ZStack {
+                Color.clear
+                    .frame(
+                        width: SidePanelContentView.buttonDiameter,
+                        height: SidePanelContentView.buttonDiameter
+                    )
+                PanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
+            }
+            .contentShape(Circle())
         }
-        .buttonStyle(
-            PanelPressStyle(
-                hoverScale: SidePanelChipState.hoverScale,
-                pressScale: SidePanelChipState.pressScale
-            )
-        )
+        .buttonStyle(PanelPressStyle())
         .background {
             Color.clear.droppyGlassControlChrome(shape: AnyShape(Circle()))
         }
@@ -1147,31 +1279,10 @@ struct ResultWindowView: View {
         .disabled(!model.canSwap)
     }
 
-    private var swapGlyph: some View {
-        PanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
-            .chipHidesInk(chip.covers(.swap))
-            .allowsHitTesting(false)
-    }
-
     /// The original's box: the shelf's short input, with the swap disc's pocket
     /// cut into its top edge when the row is above it.
     private var sourceTile: some View {
         sourceWords
-            .background {
-                if showsLanguageRow {
-                    FrostedTileSurface(shape: AnyShape(tileShape))
-                        .mask {
-                            GlassPocketMask(
-                                shape: AnyShape(tileShape),
-                                centreY: -Self.rowGap,
-                                radius: SidePanelContentView.discRadius,
-                                topFillet: Self.seamFillet
-                            )
-                        }
-                } else {
-                    tileGlass
-                }
-            }
     }
 
     private var sourceWords: some View {
@@ -1202,35 +1313,18 @@ struct ResultWindowView: View {
         model.sourceID == TranslateModel.auto ? sourceName : model.name(for: model.sourceID)
     }
 
-    /// The result's box. Alone, it carries the target picker at its top edge;
-    /// beside an original, the picker sits in the language row above instead.
+    /// The result's box. The target picker of a result shown alone sits above
+    /// it on the card; beside an original, the language row carries it instead.
     private var resultTile: some View {
-        VStack(alignment: .leading, spacing: DroppySpacing.xs) {
-            if !showsLanguageRow {
-                LanguageMenu(
-                    model: model,
-                    selection: $model.targetID,
-                    includesAuto: false,
-                    label: model.name(for: model.targetID),
-                    fontSize: SidePanelContentView.labelFontSize,
-                    chipTarget: .target,
-                    availableIDs: model.installedTargetIDs,
-                    showsChevron: true
-                )
-                .padding(.leading, PanelTileText.sideInset)
-                .chipTarget(.target)
+        resultWords
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            // The copy sits on the tile's bottom edge, as on the edge panel's
+            // result box, and outside the fade so its word stays sharp.
+            .overlay(alignment: .bottomTrailing) {
+                copyButton
+                    .padding(.trailing, DroppySpacing.sm)
+                    .padding(.bottom, DroppySpacing.sm)
             }
-            resultWords
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The copy sits on the tile's bottom edge, as on the edge panel's
-        // result box, and outside the fade so its word stays sharp.
-        .overlay(alignment: .bottomTrailing) {
-            copyButton
-                .padding(.trailing, DroppySpacing.sm)
-                .padding(.bottom, DroppySpacing.sm)
-        }
-        .background { tileGlass }
     }
 
     private var resultWords: some View {
@@ -1258,7 +1352,6 @@ struct ResultWindowView: View {
             }
         } label: {
             PanelCopyLabel(copied: copied)
-                .chipHidesInk(chip.covers(.copy))
         }
         .buttonStyle(DroppyQuietButtonStyle(size: .small))
         .chipTarget(.copy)
@@ -1333,77 +1426,95 @@ struct ResultWindowView: View {
 
     // MARK: - The chip
 
-    /// The panel's sliding effect: one piece of glass that marks the control
-    /// under the pointer, wherever it sits on the card. It travels between
-    /// controls, so a move reads as the glass sliding, not blinking.
+    /// The panel's sliding effect: one mark that travels to the control under
+    /// the pointer, so a move reads as the mark sliding, not blinking.
     private var chipLayer: some View {
         ZStack(alignment: .topLeading) {
             chipWash
-            chipGlass
+            glassMark
             chipInk
         }
         .allowsHitTesting(false)
-        .animation(DroppyAnimation.tabSelect, value: chip.target)
+        .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: chip.target)
     }
 
-    /// A menu row takes a wash in its own silhouette: it already sits on the
-    /// menu's glass, and a second glass over it would hide its words.
+    /// A box takes a neutral wash, since it is text rather than glass. A button
+    /// takes the same wash only where there is no Liquid Glass; above that,
+    /// `glassMark` is the mark.
     @ViewBuilder
     private var chipWash: some View {
-        if let rect = chip.rect(resting: nil), chip.marksWithWash(chip.target) {
-            RoundedRectangle(cornerRadius: 15, style: .continuous)
-                .fill(AdaptiveColors.overlayAuto(0.14))
-                .frame(width: rect.width, height: rect.height)
-                .offset(x: rect.minX, y: rect.minY)
-                .animation(DroppyAnimation.tabSelect, value: rect)
+        if let rect = chip.rect(resting: nil),
+           (chip.target ?? chip.lastTarget)?.isBox == true || !SidePanelChipState.hasLiquidGlass {
+            let marked = chip.target ?? chip.lastTarget
+            ZStack(alignment: .topLeading) {
+                washOutline
+                    .stroke(
+                        chip.markGlow(for: marked),
+                        lineWidth: SidePanelChipState.markGlowWidth
+                    )
+                    .blur(radius: SidePanelChipState.markGlowRadius)
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+                washOutline
+                    .fill(chip.markFill(for: marked))
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+            }
+            .opacity(chip.target == nil ? 0 : 1)
+            .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: rect)
+            .animation(DroppyAnimation.hoverQuick, value: chip.pressed)
+            .animation(DroppyAnimation.state, value: marked?.isControl ?? false)
+            .animation(DroppyAnimation.state, value: chip.target == nil)
         }
     }
 
-    /// The glass over the marked control. It takes the control's frame and
-    /// reaches toward the one it is travelling to.
+    /// The wash follows the control: a menu row keeps the menu's corners, a
+    /// button keeps the shape its glass is.
+    private var washOutline: AnyShape {
+        switch chip.target ?? chip.lastTarget {
+        case .menuCapture, .menuSelect, .menuPin, .menuSettings:
+            return AnyShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        default:
+            return AnyShape(RoundedRectangle(cornerRadius: 29, style: .continuous))
+        }
+    }
+
+    /// The mark on macOS 26: one capsule of Liquid Glass. The control's ink
+    /// reads through it, so the glass needs no copy of it.
     @ViewBuilder
-    private var chipGlass: some View {
-        if let rect = chip.rect(resting: nil) {
-            let destination = chip.target.flatMap { chip.frames[$0] } ?? rect
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .droppyGlassControlChrome(
-                    shape: AnyShape(
-                        LiquidChipShape(
-                            rect: rect,
-                            destination: CGPoint(x: destination.midX, y: destination.midY)
-                        )
-                    ),
-                    isHovering: true
-                )
-                .opacity(chip.target == nil || chip.marksWithWash(chip.target) ? 0 : 1)
-                .animation(DroppyAnimation.tabSelect, value: rect)
+    private var glassMark: some View {
+        let marked = chip.target ?? chip.lastTarget
+        if SidePanelChipState.hasLiquidGlass,
+           let marked, !marked.isBox,
+           let rect = chip.rect(resting: nil) {
+            SidePanelChipGlass(rect: rect)
+                .opacity(chip.target == nil ? 0 : 1)
+                .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: rect)
                 .animation(DroppyAnimation.state, value: chip.target == nil)
         }
     }
 
-    /// The marked control's ink, drawn above the glass so the glass never sits
-    /// over the glyph. The control hides its own copy while the chip covers it.
-    @ViewBuilder
-    private var chipInk: some View {
-        if let target = chip.target, let frame = chip.frames[target] {
-            PanelChipInk(scale: chip.inkScale) {
-                chipInk(for: target)
-                    .frame(width: frame.width, height: frame.height)
-            }
-            .offset(x: frame.minX, y: frame.minY)
-            .id(target)
-            .transition(.opacity)
-        }
-    }
-
+    /// The marked control's own ink, redrawn above the glass so its glyph and
+    /// words stay crisp. Each case mirrors the control it marks.
     @ViewBuilder
     private func chipInk(for target: SidePanelChipTarget) -> some View {
         switch target {
         case .source:
-            languageInk(for: sourceMenuLabel)
+            PillLanguageLabel(
+                text: sourceMenuLabel,
+                highlighted: true,
+                fontSize: SidePanelContentView.bodyFontSize,
+                alignment: .center,
+                edgeInset: Self.rowEdgeInset
+            )
         case .target:
-            languageInk(for: model.name(for: model.targetID))
+            PillLanguageLabel(
+                text: model.name(for: model.targetID),
+                highlighted: true,
+                fontSize: SidePanelContentView.bodyFontSize,
+                alignment: .center,
+                edgeInset: Self.rowEdgeInset
+            )
         case .swap:
             PanelSwapGlyph(spins: model.swapSpins, enabled: model.canSwap)
         case .copy:
@@ -1413,35 +1524,40 @@ struct ResultWindowView: View {
                 iconFont: 12,
                 rotation: model.isToolbarExpanded ? 90 : 0
             )
-            .animation(DroppyAnimation.state, value: model.isToolbarExpanded)
         case .engine:
             PanelEngineLabel(model: model)
+        case .menuCapture, .menuSelect, .menuPin, .menuSettings:
+            if let content = PanelMoreMenu.content(
+                for: target,
+                model: model,
+                pinned: isPinned
+            ) {
+                PanelToolRowLabel(
+                    content: content,
+                    opacity: content.disabled ? 0.4 : 1
+                )
+            }
         default:
             EmptyView()
         }
     }
 
-    /// The language ink the chip draws while it covers a control. The row's
-    /// labels are the shelf's pill labels and keep their size; the lone
-    /// picker inside the result box is the smaller menu label.
     @ViewBuilder
-    private func languageInk(for text: String) -> some View {
-        if showsLanguageRow {
-            PillLanguageLabel(
-                text: text,
-                highlighted: true,
-                fontSize: SidePanelContentView.bodyFontSize,
-                alignment: .center,
-                edgeInset: Self.rowEdgeInset
-            )
-        } else {
-            PanelMenuLabel(text: text, fontSize: SidePanelContentView.labelFontSize)
+    private var chipInk: some View {
+        if let target = chip.target,
+           let frame = chip.frames[target],
+           target.isControl {
+            chipInk(for: target)
+                .frame(width: frame.width, height: frame.height)
+                .offset(x: frame.minX, y: frame.minY)
+                .id(target)
+                .transition(.opacity)
         }
     }
 }
 
-/// The swap disc's glyph, drawn apart from its glass so the chip can put the
-/// glyph above the chip's own glass.
+/// The swap disc's glyph, drawn apart from its glass: the hover mark is the
+/// disc alone, and the arrows never move with it.
 private struct PanelSwapGlyph: View {
     var spins: Int
     var enabled: Bool
@@ -1462,8 +1578,7 @@ private struct PanelSwapGlyph: View {
     }
 }
 
-/// The copy disc's label. The chip draws this same view above its own glass,
-/// so the words never shift.
+/// The copy disc's label, drawn once on the button's own glass.
 private struct PanelCopyLabel: View {
     var copied: Bool
 
@@ -1495,7 +1610,6 @@ struct ResultWindowStatusView: View {
                     .cardTextShadow()
                     .lineLimit(4)
             }
-            Spacer(minLength: 0)
             HStack(spacing: DroppySpacing.sm) {
                 if let actionTitle, let onAction {
                     Button(action: onAction) {

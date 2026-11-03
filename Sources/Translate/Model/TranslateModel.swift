@@ -128,23 +128,6 @@ final class TranslateModel: ObservableObject {
 
     @Published var input = ""
     @Published private(set) var output = ""
-    /// A picture of a result in a model of its own. Written through the
-    /// Published storage so assigning sourceID or targetID here neither
-    /// persists the choice nor starts a translation.
-    func beginPreview(
-        source: String,
-        target: String,
-        text: String,
-        translated: String,
-        status: Status = .idle,
-        showsResult: Bool = true
-    ) {
-        _sourceID = Published(initialValue: source)
-        _targetID = Published(initialValue: target)
-        _input = Published(initialValue: text)
-        _output = Published(initialValue: showsResult ? translated : "")
-        _status = Published(initialValue: status)
-    }
     @Published private(set) var status: Status = .idle
     @Published private(set) var detected: String?
     @Published private(set) var captureState: CaptureState = .idle
@@ -166,9 +149,6 @@ final class TranslateModel: ObservableObject {
     @Published private(set) var notice: String?
     @Published private(set) var copied = false
     @Published private(set) var canRetryTranslation = false
-    /// Set when the shelf should grow into the full result page; the widget
-    /// takes it once, when it mounts.
-    @Published private(set) var pageRequest = false
     /// The panel floats next to the last picked region, so the eye stays put.
     private(set) var lastCaptureRegion: CGRect?
     private(set) var lastCaptureScreen: NSScreen?
@@ -180,6 +160,22 @@ final class TranslateModel: ObservableObject {
 
     @Published var targetID: String = TranslateModel.english {
         didSet { languageChanged(key: "target", value: targetID) }
+    }
+
+    /// Seeds the model behind a settings picture. Every property is set through
+    /// its backing storage, so the example never moves the user's settings.
+    func beginPreview(
+        source: String,
+        target: String,
+        text: String,
+        translated: String,
+        page: Page
+    ) {
+        _sourceID = Published(initialValue: source)
+        _targetID = Published(initialValue: target)
+        _input = Published(initialValue: text)
+        _output = Published(initialValue: translated)
+        _resultPage = Published(initialValue: page)
     }
 
     @Published var liveTranslate = false {
@@ -203,18 +199,17 @@ final class TranslateModel: ObservableObject {
         didSet { persist("sidePanelSide", sidePanelSide.rawValue) }
     }
 
-    /// Moves the current result or status to another home, so the change is
-    /// visible without waiting for the next translation.
+    /// Moves the current result or status to the chosen home and closes the
+    /// ones it no longer uses, so one Display mode at a time is on screen.
     func setResultDisplay(_ display: ResultDisplay) {
         guard display != resultDisplay else { return }
-        let oldDisplay = resultDisplay
         resultDisplay = display
-        if oldDisplay == .panel && display != .panel {
+        if display != .panel {
             TranslationPanel.shared.closePanel()
         }
         if hasCompletedResultForCurrentInput {
             presentResultInSelectedDestination()
-        } else if display != .normal {
+        } else {
             presentStatusInSelectedDestination()
         }
     }
@@ -388,16 +383,6 @@ final class TranslateModel: ObservableObject {
         let status: DropletPermissionStatus
 
         var id: String { permission.rawValue }
-
-        var statusKey: String {
-            switch status {
-            case .granted: return "permission.status.granted"
-            case .notDetermined: return "permission.status.notDetermined"
-            case .denied: return "permission.status.denied"
-            case .unavailable: return "permission.status.unavailable"
-            @unknown default: return "permission.status.unavailable"
-            }
-        }
     }
 
     @Published private(set) var permissionStates: [PermissionState] = []
@@ -406,16 +391,16 @@ final class TranslateModel: ObservableObject {
         guard let host else { return }
         permissionStates = [
             PermissionState(
-                permission: .screenCapture,
-                titleKey: "settings.permissions.screenCapture",
-                detailKey: "settings.permissions.screenCapture.sub",
-                status: host.permissions.status(for: .screenCapture)
-            ),
-            PermissionState(
                 permission: .accessibility,
                 titleKey: "settings.permissions.accessibility",
                 detailKey: "settings.permissions.accessibility.sub",
                 status: host.permissions.status(for: .accessibility)
+            ),
+            PermissionState(
+                permission: .screenCapture,
+                titleKey: "settings.permissions.screenCapture",
+                detailKey: "settings.permissions.screenCapture.sub",
+                status: host.permissions.status(for: .screenCapture)
             )
         ]
     }
@@ -499,8 +484,18 @@ final class TranslateModel: ObservableObject {
         didSet { persist("autoCopy", autoCopyResult) }
     }
 
-    @Published var resultContent: ResultContent = .result {
-        didSet { persist("resultContent", resultContent.rawValue) }
+    /// The page the user picks for a finished translation: the translation
+    /// alone, or the original above it.
+    @Published var resultPage: Page = .result {
+        // Saved under the old key so a choice made before the rename survives.
+        didSet { persist("resultContent", resultPage.rawValue) }
+    }
+
+    /// The page the cards are on right now. Words on screen decide it, so a
+    /// status never hides a translation the user can still read.
+    var page: Page {
+        guard output.isEmpty else { return resultPage }
+        return status == .idle && notice == nil ? .input : .status
     }
 
     @Published var uiLanguage = "system" {
@@ -547,13 +542,6 @@ final class TranslateModel: ObservableObject {
         shelfUsesIslandCurvature = !geometry.isHardwareNotch
         notchCutoutWidth = geometry.closedWidth
         notchCutoutHeight = geometry.closedHeight
-    }
-
-    /// Re-reads the host's shape when the Preview page opens, so it reflects a
-    /// Notch/Island change made elsewhere in Droppy.
-    func refreshDisplayPreviewShape() {
-        guard let geometry = host?.environment.notchGeometry else { return }
-        updateShelfPreviewShape(from: geometry)
     }
 
     private var shelfChangeCancellable: AnyCancellable?
@@ -633,12 +621,13 @@ final class TranslateModel: ObservableObject {
         sidePanelSide = SidePanelSide(
             rawValue: preferences.value(forKey: "sidePanelSide", default: SidePanelSide.right.rawValue)
         ) ?? .right
-        resultContent = ResultContent(
-            rawValue: Self.stored(
-                preferences, key: "resultContent", legacy: "popupContent",
-                default: ResultContent.result.rawValue
-            )
-        ) ?? .result
+        // Saved values from before the rename: "both" was the pair page.
+        let storedPage = Self.stored(
+            preferences, key: "resultContent", legacy: "popupContent",
+            default: Page.result.rawValue
+        )
+        resultPage = Page(rawValue: storedPage)
+            ?? (storedPage == "both" ? .pair : .result)
         autoCopyResult = preferences.value(forKey: "autoCopy", default: false)
         translationProvider = TranslationProvider(
             rawValue: preferences.value(forKey: "provider", default: TranslationProvider.apple.rawValue)
@@ -746,7 +735,6 @@ final class TranslateModel: ObservableObject {
         shelfWidgetToReveal = nil
         copyFeedbackTask?.cancel()
         copyFeedbackTask = nil
-        pageRequest = false
         copied = false
         shelfChangeCancellable?.cancel()
         shelfChangeCancellable = nil
@@ -854,7 +842,7 @@ final class TranslateModel: ObservableObject {
                     pendingTranslationSuccess = nil
                     invalidateCapturedSelectionAction = nil
                 }
-                if !live { presentResultInSelectedDestination() }
+                presentResultInSelectedDestination()
                 if !live { revealResultWhenReady() }
                 return
             }
@@ -873,7 +861,7 @@ final class TranslateModel: ObservableObject {
         // instead of replacing it with a spinner. An empty card keeps its
         // face: the grip that starts the translation is on it, and folding
         // the card away would drop the drag.
-        if resultDisplay == .panel, !output.isEmpty {
+        if !output.isEmpty {
             TranslationPanel.shared.closePanel()
         }
         let target = resolvedTarget
@@ -929,7 +917,7 @@ final class TranslateModel: ObservableObject {
                         pendingTranslationSuccess = nil
                         invalidateCapturedSelectionAction = nil
                     }
-                    if !live { presentResultInSelectedDestination() }
+                    presentResultInSelectedDestination()
                     if !live { revealResultWhenReady() }
                     return
                 }
@@ -965,7 +953,7 @@ final class TranslateModel: ObservableObject {
                     pendingTranslationSuccess = nil
                     invalidateCapturedSelectionAction = nil
                 }
-                if !live { presentResultInSelectedDestination() }
+                presentResultInSelectedDestination()
                 if !live { revealResultWhenReady() }
                 return
             }
@@ -1241,6 +1229,21 @@ final class TranslateModel: ObservableObject {
 
     func retryTranslation() { translate() }
 
+    /// The result card's close: drops the pin and asks the host to put the
+    /// shelf away. The host closes only a shelf this droplet opened, so a
+    /// shelf the user opened by hovering needs the widget revealed first.
+    func hideShelf() {
+        guard let host else { return }
+        isPinned = false
+        pinnedShelfSuspended = false
+        _ = setShelfHold(false, on: host)
+        host.shelf.close()
+        if isShelfWidgetVisible || host.shelf.isExpanded {
+            _ = host.shelf.open(revealing: host.shelf.soloWidgetID ?? "translate")
+            host.shelf.close()
+        }
+    }
+
     /// Hides an open shelf for an external interaction and restores its widget
     /// and pin state on every return path.
     func withShelfHidden(_ operation: () async -> Bool) async -> Bool {
@@ -1265,7 +1268,6 @@ final class TranslateModel: ObservableObject {
         }
         defer {
             if !isDeactivating, let activeHost = self.host {
-                let hasSuccessfulCapture = shelfWidgetToReveal != nil
                 isPinned = wasPinned
                 // Clear the suspension before opening, so a view appearing
                 // during open(revealing:) restores its hold rather than being
@@ -1297,7 +1299,6 @@ final class TranslateModel: ObservableObject {
                             } else {
                                 // Shelf is the home for .normal, and for states
                                 // that cannot offer recovery.
-                                if hasSuccessfulCapture { pageRequest = true }
                                 restored = activeHost.shelf.open(revealing: reveal)
                                 if !isShelfWidgetVisible {
                                     scheduleShelfReopen(reveal)
@@ -1311,7 +1312,6 @@ final class TranslateModel: ObservableObject {
                                 if resultRoute == .wait {
                                     pendingResultReveal = reveal
                                 } else {
-                                    if hasSuccessfulCapture { pageRequest = true }
                                     scheduleShelfReopen(reveal)
                                 }
                             }
@@ -1889,37 +1889,48 @@ final class TranslateModel: ObservableObject {
             && lastCompletedLiveKey.target == targetID
     }
 
-    /// Capture and selection can finish while the shelf animates away; defer
-    /// the host request until it is gone instead of losing it.
-    private func presentResultInSelectedDestination() {
-        guard !output.isEmpty else { return }
+    /// Opens an empty card where the user chose to see results, with the caret
+    /// in it. The shortcut has no surface of its own, so the Display setting
+    /// decides which one comes up.
+    func openTranslate() {
+        guard let host else { return }
         switch resultDisplay {
         case .normal:
+            // The host promotes a solo, keyboard-focusable widget on its own.
+            _ = host.shelf.open(revealing: "translate")
+            host.shelf.requestKeyboardFocus()
+        case .panel:
+            TranslationPanel.shared.showEmpty(model: self)
+        case .sidePanel:
+            SidePanel.shared.revealEmpty()
+        }
+    }
+
+    /// Capture and selection can finish while the shelf animates away; defer
+    /// the host request until it is gone instead of losing it.
+    ///
+    /// Only the chosen Display mode receives the result; the shelf reads the
+    /// model itself, so normal has nothing to present.
+    private func presentResultInSelectedDestination() {
+        guard !output.isEmpty else { return }
+        guard !captureShelfDismissalInProgress else {
+            pendingSelectedDestinationPresentation = true
             return
-        case .panel, .sidePanel:
-            guard !captureShelfDismissalInProgress else {
-                pendingSelectedDestinationPresentation = true
-                return
-            }
-            switch resultDisplay {
-            case .panel:
-                showPanelResult()
-            case .sidePanel:
-                showSidePanelResult()
-            case .normal:
-                break
-            }
+        }
+        switch resultDisplay {
+        case .normal: break
+        case .panel: showPanelResult()
+        case .sidePanel: showSidePanelResult()
         }
     }
 
     private func showPanelResult() {
-        guard resultDisplay == .panel else { return }
         TranslationPanel.shared.showResult(
             model: self,
             translated: output,
             source: input,
             sourceName: name(for: detected ?? (sourceID == Self.auto ? targetID : sourceID)),
-            showsOriginal: resultContent.showsOriginal,
+            showsOriginal: resultPage.showsOriginal,
             onCopy: { [weak self] _ in self?.copyOutput() },
             near: lastCaptureRegion,
             on: lastCaptureScreen
@@ -1929,14 +1940,12 @@ final class TranslateModel: ObservableObject {
     /// The edge panel is the droplet's own card: the result lands in it and the
     /// card opens on it.
     private func showSidePanelResult() {
-        guard resultDisplay == .sidePanel else { return }
         SidePanel.shared.revealResult()
     }
 
-    /// Keeps terminal statuses in the selected destination, with a recovery
+    /// Keeps a terminal status in the chosen destination, with a recovery
     /// action when the state permits one.
     private func presentStatusInSelectedDestination() {
-        guard resultDisplay != .normal else { return }
         let message: String
         let recoveryAction: StatusRecoveryAction?
         switch status {
@@ -1980,7 +1989,8 @@ final class TranslateModel: ObservableObject {
 
         switch resultDisplay {
         case .normal:
-            return
+            // The shelf draws the status from the model.
+            break
         case .panel:
             TranslationPanel.shared.showStatus(
                 message: message,
@@ -2034,14 +2044,6 @@ final class TranslateModel: ObservableObject {
         }
         TranslationPanel.shared.closePanel()
         SidePanel.shared.fold()
-    }
-
-    /// The widget takes the request at mount, so the shelf grows into the full
-    /// result page exactly once.
-    func takePageRequest() -> Bool {
-        guard pageRequest else { return false }
-        pageRequest = false
-        return true
     }
 
     // MARK: Pasteboard
@@ -2170,7 +2172,6 @@ final class TranslateModel: ObservableObject {
         }
         guard let host else { return }
         // Normal mode uses the shelf as the result and recovery destination.
-        pageRequest = true
         guard !isShelfWidgetVisible else { return }
         _ = host.shelf.open(revealing: reveal)
         if !isShelfWidgetVisible {

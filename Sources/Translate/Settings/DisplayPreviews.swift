@@ -15,13 +15,11 @@ enum PreviewSample {
             : (thai, english, "th")
     }
 
-    /// A real model preloaded with the example, so the widget draws its result
-    /// the way it draws a real one, in the user's languages.
-    ///
-    /// `showsResult` is false for the surfaces whose first step is the input
-    /// alone: their example must show the card as it opens.
+    /// A real model preloaded with the example, so every picture is drawn by
+    /// the surface's own view, in the user's languages and with the page they
+    /// chose.
     @MainActor
-    static func widgetModel(_ model: TranslateModel, showsResult: Bool = true) -> TranslateModel {
+    static func widgetModel(_ model: TranslateModel) -> TranslateModel {
         let sample = forTarget(model.targetID)
         let preview = TranslateModel()
         preview.beginPreview(
@@ -29,298 +27,331 @@ enum PreviewSample {
             target: model.targetID,
             text: sample.source,
             translated: sample.result,
-            showsResult: showsResult
+            page: model.resultPage
         )
         return preview
+    }
+
+    /// The body the example's card holds: the input at the shelf's floor
+    /// beside the result, or the result alone.
+    @MainActor
+    static func bodyHeight(_ model: TranslateModel) -> CGFloat {
+        let alone = !model.resultPage.showsOriginal
+        let box = SidePanelContentView.shelfBoxFloor
+        return SidePanelContentView.bodyHeight(
+            forBox: alone ? 0 : box,
+            result: true,
+            resultHeight: SidePanelContentView.restingResultHeight(
+                for: model,
+                alone: alone,
+                matching: box
+            )
+        )
+    }
+}
+
+/// The shape and theme the host draws the example in. Copied from the model,
+/// so a picture holds the example's words and nothing else.
+private struct PreviewLook {
+    var colorScheme: ColorScheme
+    var side: SidePanelSide
+    var usesIslandCurvature: Bool
+    var notchWidth: CGFloat
+    var notchHeight: CGFloat
+}
+
+/// The droplet's own surface, cut to the card's own outline.
+///
+/// The preview uses the same card the live floating panel and edge panel
+/// wear. The live card sits on the desktop; the picture sits on the settings
+/// page, so the droplet's black goes under it first: glass melts from black
+/// the way it does on the notch, instead of melting into the page and coming
+/// out grey.
+private struct PreviewCardFace: View {
+    let shape: AnyShape
+
+    var body: some View {
+        ZStack {
+            shape.fill(.black)
+            SidePanelCardSurface(shape: shape)
+        }
     }
 }
 
 /// One destination drawn inside the host's shell and surface. Inert: the
-/// picker above chooses, and nothing here changes a setting.
+/// pickers above choose, and nothing here changes a setting.
 struct ResultDisplayPreview: View {
     let display: ResultDisplay
     @ObservedObject var model: TranslateModel
 
-    /// The size this shelf widget declares to the host.
-    private static let shelfWidth: CGFloat = 440
-
-    /// The box every picture is drawn into. Its width is the shelf's, so a
-    /// picture never reads wider than its siblings; its height is the tallest
-    /// card a picture shows, so the widest one still fills the width instead of
-    /// shrinking to fit a short stage.
-    static let stageSize = CGSize(
-        width: 440,
-        height: SidePanel.cardHeight(forBody: SidePanelContentView.panelMinBodyHeight)
-    )
+    /// One stage for every picture, so switching the place never changes how
+    /// large the example reads. Its width is the settings column's worth.
+    static let stageWidth: CGFloat = 440
 
     var body: some View {
-        drawing
+        let preview = PreviewSample.widgetModel(model)
+        let look = PreviewLook(
+            colorScheme: model.surfaceColorScheme,
+            side: model.sidePanelSide,
+            usesIslandCurvature: model.shelfUsesIslandCurvature,
+            notchWidth: model.notchCutoutWidth,
+            notchHeight: model.notchCutoutHeight
+        )
+        let width = Self.surfaceWidth(display, model: preview, look: look)
+        let scale = Self.scale(forWidth: width)
+        // The edge panel hangs from a screen edge, so the picture sits on the
+        // stage's own edge instead of floating away from it.
+        let edge: Alignment = display == .sidePanel
+            ? (look.side == .left ? .leading : .trailing)
+            : .center
+        return drawing(preview, look: look)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             // Scale after layout so the shell and its contents keep their
             // proportions together. The anchor keeps the picture's top edge
-            // where it was, so the name under it stays with it.
+            // where it was, so the row below it stays put.
             .scaleEffect(scale, anchor: .top)
-            .frame(
-                width: surfaceSize.width * scale,
-                height: surfaceSize.height * scale,
-                alignment: .top
-            )
-            .frame(maxWidth: .infinity)
+            .frame(width: width * scale, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: edge)
     }
 
-    /// The picture fits the stage the way a document fits a window: as large
-    /// as its own shape allows, and no larger.
-    private var scale: CGFloat {
-        Self.previewScale(surfaceSize: surfaceSize, stageSize: Self.stageSize)
-    }
-
-    /// The scale a picture of `surfaceSize` takes inside `stageSize`.
-    static func previewScale(surfaceSize: CGSize, stageSize: CGSize) -> CGFloat {
-        guard surfaceSize.width > 0, surfaceSize.height > 0 else { return 1 }
-        return min(
-            stageSize.width / surfaceSize.width,
-            stageSize.height / surfaceSize.height
-        )
-    }
-
-    private var surfaceSize: CGSize {
+    private static func surfaceWidth(_ display: ResultDisplay, model: TranslateModel, look: PreviewLook) -> CGFloat {
         switch display {
-        case .normal: return shelfSurfaceSize
-        case .panel:
-            // The floating panel's own card: the edge panel's body in the
-            // rounded outline, as the shortcut opens it.
-            return FloatingSurfacePreview.cardSize
-        case .sidePanel: return sidePanelSurfaceSize
+        case .normal:
+            let widget = ShelfWidgetSurfacePreview.widgetSize(for: model, look: look)
+            return ShelfWidgetSurfacePreview.previewSize(widgetSize: widget, look: look).width
+        case .panel, .sidePanel:
+            return SidePanel.expandedWidth
         }
     }
 
-    private var shelfSurfaceSize: CGSize {
-        ShelfWidgetSurfacePreview.previewSize(
-            widgetSize: shelfWidgetSize,
-            usesIslandCurvature: model.shelfUsesIslandCurvature,
-            notchHeight: model.notchCutoutHeight
-        )
-    }
-
-    private var sidePanelSurfaceSize: CGSize {
-        SidePanelSurfacePreview.cardSize
-    }
-
-    /// The shelf opens at its first step: the input alone, in the card the
-    /// host draws around it.
-    private var shelfWidgetSize: CGSize {
-        CGSize(width: Self.shelfWidth, height: ShelfHeightStep.compact.contentHeight)
+    /// The picture fills the stage's width; no picture is ever widened past
+    /// its own pixels.
+    private static func scale(forWidth width: CGFloat) -> CGFloat {
+        guard width > 0 else { return 1 }
+        return min(1, stageWidth / width)
     }
 
     @ViewBuilder
-    private var drawing: some View {
+    private func drawing(_ preview: TranslateModel, look: PreviewLook) -> some View {
         switch display {
         case .normal:
-            ShelfWidgetSurfacePreview(
-                model: model,
-                widgetSize: shelfWidgetSize
-            )
-            .frame(
-                width: surfaceSize.width,
-                height: surfaceSize.height,
-                alignment: .topLeading
-            )
+            ShelfWidgetSurfacePreview(model: preview, look: look)
         case .panel:
-            FloatingSurfacePreview(model: model)
-                .frame(
-                    width: surfaceSize.width,
-                    height: surfaceSize.height,
-                    alignment: .top
-                )
+            FloatingSurfacePreview(model: preview, look: look)
         case .sidePanel:
-            SidePanelSurfacePreview(model: model)
-                .frame(
-                    width: surfaceSize.width,
-                    height: surfaceSize.height,
-                    alignment: .topLeading
-                )
+            SidePanelSurfacePreview(model: preview, look: look)
         }
     }
 }
 
 /// The droplet's own floating panel: the edge panel's card in the panel's
-/// rounded outline, as the shortcut opens it, before a result is in it.
-struct FloatingSurfacePreview: View {
+/// rounded outline, with the result in it.
+private struct FloatingSurfacePreview: View {
     @ObservedObject var model: TranslateModel
+    let look: PreviewLook
     @State private var chip = SidePanelChipState()
     @State private var pin = SidePanelPinState()
+    /// The body the card's own content reports, so the picture fits the real
+    /// card instead of a height guessed from the sample.
+    @State private var reportedBody: CGFloat = 0
 
-    static let bodyHeight = SidePanelContentView.panelMinBodyHeight
-    /// The panel's window is its body: the card has no strip below its face.
-    static let cardSize = CGSize(
-        width: SidePanel.expandedWidth,
-        height: bodyHeight
-    )
+    private var bodyHeight: CGFloat {
+        max(PreviewSample.bodyHeight(model), reportedBody)
+    }
+
+    private var cardSize: CGSize {
+        CGSize(width: SidePanel.expandedWidth, height: bodyHeight)
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // The sheet under the glass: the settings page is not the desktop,
-            // and glass over the page comes out grey.
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                    .fill(.black)
-                SidePanelCardSurface(
-                    shape: AnyShape(
-                        RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                    )
+            PreviewCardFace(
+                shape: AnyShape(
+                    RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
                 )
-            }
-            .frame(width: Self.cardSize.width, height: Self.cardSize.height)
-            FloatingPanelBody(
-                model: PreviewSample.widgetModel(model, showsResult: false),
-                chip: chip,
-                pin: pin
             )
-            .frame(width: Self.cardSize.width, height: Self.cardSize.height)
+            .frame(width: cardSize.width, height: cardSize.height)
+            FloatingPanelBody(
+                model: model,
+                chip: chip,
+                pin: pin,
+                onBodyHeight: { height, _ in
+                    if abs(height - reportedBody) > 0.5 { reportedBody = height }
+                },
+                translationOnly: !model.resultPage.showsOriginal
+            )
+            .frame(width: cardSize.width, height: cardSize.height)
         }
-        .frame(width: Self.cardSize.width, height: Self.cardSize.height)
-        .environment(\.colorScheme, model.surfaceColorScheme)
+        .frame(width: cardSize.width, height: cardSize.height)
+        .environment(\.colorScheme, look.colorScheme)
     }
 }
 
 /// The droplet's own edge panel: the card that opens out of the screen's edge
-/// with the result in it. The example shows the card as it opens, before a
-/// result is in it.
-struct SidePanelSurfacePreview: View {
+/// with the result in it, on the edge the user chose.
+private struct SidePanelSurfacePreview: View {
     @ObservedObject var model: TranslateModel
+    let look: PreviewLook
     @State private var chip = SidePanelChipState()
+    @State private var pin = SidePanelPinState()
+    /// The body the card's own content reports, so the picture fits the real
+    /// card instead of a height guessed from the sample.
+    @State private var reportedBody: CGFloat = 0
 
-    /// The body the panel holds with the input alone.
-    static let bodyHeight = SidePanelContentView.panelMinBodyHeight
-    /// The card, at the size it opens at.
-    static let cardSize = CGSize(
-        width: SidePanel.expandedWidth,
-        height: SidePanel.cardHeight(forBody: bodyHeight)
-    )
-    private static var contentWidth: CGFloat {
-        SidePanel.expandedWidth - SidePanelContentView.inset * 2
+    private var bodyHeight: CGFloat {
+        max(PreviewSample.bodyHeight(model), reportedBody)
     }
 
-    private var mirrored: Bool { model.sidePanelSide == .left }
+    private var cardSize: CGSize {
+        CGSize(
+            width: SidePanel.expandedWidth,
+            height: SidePanel.cardHeight(forBody: bodyHeight)
+        )
+    }
+
+    private var contentSize: CGSize {
+        CGSize(
+            width: SidePanel.expandedWidth - SidePanelContentView.sideInset * 2,
+            height: SidePanelContentView.contentHeight(forBody: bodyHeight)
+        )
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             card
+            // The live window's own hosting frame: the card's content inset,
+            // below the fillet that melts it into the screen edge.
             SidePanelContentView(
-                model: PreviewSample.widgetModel(model, showsResult: false),
+                model: model,
                 chip: chip,
-                boxFloor: SidePanelContentView.panelBoxFloor
+                pin: pin,
+                requestCapture: {},
+                requestSelection: {},
+                cancelSelection: {},
+                boxFloor: SidePanelContentView.shelfBoxFloor,
+                boxCap: SidePanelContentView.floatingBoxCap,
+                translationOnly: !model.resultPage.showsOriginal,
+                fitsResult: true,
+                maxBodyHeight: SidePanelContentView.floatingMaxBodyHeight,
+                onClose: {},
+                onPin: {},
+                onBodyHeight: { height, _ in
+                    if abs(height - reportedBody) > 0.5 { reportedBody = height }
+                }
             )
-            .frame(
-                width: Self.contentWidth,
-                height: SidePanelContentView.contentHeight(forBody: Self.bodyHeight)
-            )
+            .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
             .offset(
-                x: SidePanelContentView.inset,
+                x: SidePanelContentView.sideInset,
                 y: SidePanelCardShape.filletRadius + SidePanelContentView.inset
             )
         }
         // The panel's chrome is Droppy's dark glass, whatever the system is set
         // to, so its tiles and controls read the app's own appearance.
-        .environment(\.colorScheme, model.surfaceColorScheme)
-        .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
+        .environment(\.colorScheme, look.colorScheme)
+        .frame(width: cardSize.width, height: cardSize.height, alignment: .topLeading)
     }
 
     /// The card and its face, mirrored to the chosen edge. The content is not
     /// part of the mirror: it is already laid out for either side, and flipping
     /// it would shift it by its inset.
     private var card: some View {
-        ZStack(alignment: .topLeading) {
-            // The same face the live card draws, on the same outline. The
-            // picture has the settings page behind it, not the desktop, so the
-            // glass needs the droplet's black under it to melt from; without
-            // it the glass samples the page and comes out grey.
-            SidePanelUnifiedShape(reveal: 1, stretch: 1)
-                .fill(.black)
-            SidePanelCardSurface(
-                shape: AnyShape(SidePanelUnifiedShape(reveal: 1, stretch: 1))
-            )
-            .frame(
-                width: Self.cardSize.width,
-                height: Self.cardSize.height,
-                alignment: .topLeading
-            )
-        }
-        .scaleEffect(x: mirrored ? -1 : 1, y: 1)
-    }
-}
-
-/// The host's own surface: Droppy's Dynamic Glass, in the shape the host
-/// draws it.
-///
-/// The host's surface is a rounded rectangle, so it is drawn a corner wider
-/// than the card it covers: its own corners then fall outside the card and
-/// only its body shows, and the card reads as one piece of glass instead of a
-/// black shape with a second shape laid on it.
-struct HostGlassSurface: View {
-    let cornerRadius: CGFloat
-
-    var body: some View {
-        Group {
-            if DroppyKitSurfaceBridge.panelSurfaceProvider == nil {
-                // Standalone previews have no host theme provider; the black
-                // under it is then the whole surface.
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(.black)
-            } else {
-                DroppyPanelSurface(cornerRadius: cornerRadius)
-            }
-        }
-        .accessibilityHidden(true)
-        .allowsHitTesting(false)
+        PreviewCardFace(
+            shape: AnyShape(SidePanelUnifiedShape(reveal: 1, stretch: 1))
+        )
+        .frame(width: cardSize.width, height: cardSize.height, alignment: .topLeading)
+        .scaleEffect(x: look.side == .left ? -1 : 1, y: 1)
     }
 }
 
 /// The widget inside the host's expanded shell. The preview adds the host
 /// chrome; the widget keeps the insets `ShelfWidgetContext` supplies.
-struct ShelfWidgetSurfacePreview: View {
+private struct ShelfWidgetSurfacePreview: View {
     @ObservedObject var model: TranslateModel
-    let widgetSize: CGSize
+    let look: PreviewLook
+    @State private var chip = SidePanelChipState()
 
-    static func previewSize(
-        widgetSize: CGSize,
-        usesIslandCurvature: Bool,
-        notchHeight: CGFloat
-    ) -> CGSize {
-        let hostInsets = DroppyShellMetrics.shelfContentInsets(
-            usesNotchStyle: !usesIslandCurvature,
-            notchHeight: notchHeight
-        )
-        let slot = DroppyShellMetrics.shelfWidgetSlotInset
-        return CGSize(
-            width: widgetSize.width + hostInsets.leading + hostInsets.trailing + slot * 2,
-            height: widgetSize.height + hostInsets.top + hostInsets.bottom + slot * 2
+    /// The width the widget declares to the host.
+    static let widgetWidth: CGFloat = SidePanelContentView.shelfSoloWidth
+    /// The droplet's own inset inside the widget rectangle, on every shape.
+    static let contentInset: CGFloat = SidePanelContentView.shelfBoxInset
+    static var contentWidth: CGFloat { widgetWidth - contentInset * 2 }
+    /// The widget's height budget: 8pt top and bottom under a notch, none on
+    /// a solo island card.
+    static func verticalInset(_ look: PreviewLook) -> CGFloat {
+        look.usesIslandCurvature ? 0 : DroppySpacing.sm
+    }
+
+    static func contentHeight(for model: TranslateModel) -> CGFloat {
+        PreviewSample.bodyHeight(model) - SidePanelContentView.inset * 2
+    }
+
+    static func widgetSize(for model: TranslateModel, look: PreviewLook) -> CGSize {
+        CGSize(
+            width: widgetWidth,
+            height: contentHeight(for: model) + verticalInset(look) * 2
         )
     }
 
+    /// The shell the host draws around the widget rectangle: its own side
+    /// insets, the cutout clearance on a notch, and the 1.5pt slot on every
+    /// edge.
+    static func previewSize(widgetSize: CGSize, look: PreviewLook) -> CGSize {
+        let hostInsets = DroppyShellMetrics.shelfContentInsets(
+            usesNotchStyle: !look.usesIslandCurvature,
+            notchHeight: look.notchHeight
+        )
+        let slot = DroppyShellMetrics.shelfWidgetSlotInset * 2
+        return CGSize(
+            width: widgetSize.width + hostInsets.leading + hostInsets.trailing + slot,
+            height: widgetSize.height + hostInsets.top + hostInsets.bottom + slot
+        )
+    }
+
+    private var size: CGSize {
+        Self.previewSize(widgetSize: Self.widgetSize(for: model, look: look), look: look)
+    }
+
+    private var contentHeight: CGFloat { Self.contentHeight(for: model) }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // The shelf's chrome: the host's own surface over the shell's
-            // black, so a glass theme melts from black the way it does on the
-            // notch, and a black theme is black.
-            shell.fill(.black)
-            hostSurface
+            // The host's shelf chrome in the theme Droppy is set to, drawn by
+            // the same card as the panels: the theme is read, so the picture
+            // never wears the launcher's glass over this page's grey.
+            PreviewCardFace(shape: shell)
 
-            TranslateWidget(
-                model: PreviewSample.widgetModel(model, showsResult: false),
+            SidePanelContentView(
+                model: model,
+                chip: chip,
                 requestCapture: {},
                 requestSelection: {},
                 cancelSelection: {},
-                shelfStep: .compact
+                boxFloor: SidePanelContentView.shelfBoxFloor,
+                boxCap: SidePanelContentView.shelfBoxCap,
+                translationOnly: !model.resultPage.showsOriginal,
+                keepsGripInsideCard: true,
+                maxBodyHeight: contentHeight,
+                rowWidth: min(SidePanelContentView.defaultRowWidth, Self.contentWidth),
+                mountWidth: Self.contentWidth,
+                onShelfGripTap: {},
+                onSubmit: {},
+                onClear: {},
+                onClose: {},
+                onShelfContentHeight: { _ in }
             )
-            .padding(widgetInsets)
-            .frame(width: widgetSize.width, height: widgetSize.height)
+            .frame(width: Self.contentWidth, height: contentHeight, alignment: .topLeading)
+            .padding(EdgeInsets(
+                top: Self.verticalInset(look),
+                leading: Self.contentInset,
+                bottom: Self.verticalInset(look),
+                trailing: Self.contentInset
+            ))
             .padding(shellInsets)
 
-            if !model.shelfUsesIslandCurvature {
+            if !look.usesIslandCurvature {
                 housing
-                    .frame(width: model.notchCutoutWidth, height: model.notchCutoutHeight)
+                    .frame(width: look.notchWidth, height: look.notchHeight)
                     .frame(width: size.width, alignment: .center)
             }
         }
@@ -328,36 +359,13 @@ struct ShelfWidgetSurfacePreview: View {
         .clipShape(shell)
         // The picture follows the appearance Droppy is drawing its surfaces
         // in, so the glass on the shelf reads the app's own theme.
-        .environment(\.colorScheme, model.surfaceColorScheme)
-    }
-
-    private var size: CGSize {
-        Self.previewSize(
-            widgetSize: widgetSize,
-            usesIslandCurvature: model.shelfUsesIslandCurvature,
-            notchHeight: model.notchCutoutHeight
-        )
-    }
-
-    /// The host's own surface over the shell. On the island the shell is the
-    /// host's own rounded rectangle, so the surface is drawn whole; a hardware
-    /// notch has a shell of its own shape, and the surface is clipped to it.
-    @ViewBuilder
-    private var hostSurface: some View {
-        if model.shelfUsesIslandCurvature {
-            HostGlassSurface(cornerRadius: DroppyShellMetrics.expandedIslandCornerRadius)
-        } else {
-            ThemedHostSurfacePreview(
-                shell: shell,
-                cornerRadius: DroppyShellMetrics.expandedShelfCornerRadius
-            )
-        }
+        .environment(\.colorScheme, look.colorScheme)
     }
 
     private var shellInsets: EdgeInsets {
         let hostInsets = DroppyShellMetrics.shelfContentInsets(
-            usesNotchStyle: !model.shelfUsesIslandCurvature,
-            notchHeight: model.notchCutoutHeight
+            usesNotchStyle: !look.usesIslandCurvature,
+            notchHeight: look.notchHeight
         )
         let slot = DroppyShellMetrics.shelfWidgetSlotInset
         return EdgeInsets(
@@ -368,13 +376,8 @@ struct ShelfWidgetSurfacePreview: View {
         )
     }
 
-    private var widgetInsets: EdgeInsets {
-        let inset: CGFloat = model.shelfUsesIslandCurvature ? 0 : DroppySpacing.sm
-        return EdgeInsets(top: inset, leading: inset, bottom: inset, trailing: inset)
-    }
-
     private var shell: AnyShape {
-        if model.shelfUsesIslandCurvature {
+        if look.usesIslandCurvature {
             return AnyShape(RoundedRectangle(
                 cornerRadius: DroppyShellMetrics.expandedIslandCornerRadius,
                 style: .continuous
@@ -389,37 +392,12 @@ struct ShelfWidgetSurfacePreview: View {
     private var housing: some View {
         UnevenRoundedRectangle(
             topLeadingRadius: 0,
-            bottomLeadingRadius: DroppyShellMetrics.closedNotchBottomRadius(height: model.notchCutoutHeight),
-            bottomTrailingRadius: DroppyShellMetrics.closedNotchBottomRadius(height: model.notchCutoutHeight),
+            bottomLeadingRadius: DroppyShellMetrics.closedNotchBottomRadius(height: look.notchHeight),
+            bottomTrailingRadius: DroppyShellMetrics.closedNotchBottomRadius(height: look.notchHeight),
             topTrailingRadius: 0,
             style: .continuous
         )
         .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-        .allowsHitTesting(false)
-    }
-}
-
-/// The host's own surface, in the shape of the shelf's chrome.
-///
-/// In Droppy this is the themed glass, and it follows the app's theme. It is
-/// drawn over whatever is behind the picture, so the glass melts into the
-/// page the way it melts into the desktop, and the app's own raised wash on
-/// top of it is what makes the card read as a surface instead of a hole.
-private struct ThemedHostSurfacePreview: View {
-    let shell: AnyShape
-    let cornerRadius: CGFloat
-
-    var body: some View {
-        Group {
-            if DroppyKitSurfaceBridge.panelSurfaceProvider == nil {
-                // Standalone previews have no host theme provider; the black
-                // under it is then the whole surface.
-                shell.fill(.black)
-            } else {
-                DroppyPanelSurface(cornerRadius: cornerRadius)
-            }
-        }
-        .accessibilityHidden(true)
         .allowsHitTesting(false)
     }
 }

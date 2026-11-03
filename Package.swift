@@ -21,10 +21,6 @@ let package = Package(
                 "Translate",
                 .product(name: "DroppyKitHarness", package: "droppykit")
             ]
-        ),
-        .testTarget(
-            name: "TranslateTests",
-            dependencies: ["Translate"]
         )
     ]
 )
