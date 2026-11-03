@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0] - 2026-10-31
+## [1.2.0]
 
 The droplet as it stands in this release. A feature that was tried and taken
 away again is not in it.
