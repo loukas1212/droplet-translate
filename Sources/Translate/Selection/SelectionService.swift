@@ -141,9 +141,8 @@ final class SelectionService {
                 return
             }
             if let usablePreselection {
-                // Keep the shelf open for .normal so the widget receives the
-                // result; the other destinations need it hidden, as the slow
-                // path does.
+                // Normal keeps the shelf open so the widget receives the
+                // result; other destinations hide it as the slow path does.
                 if model.resultDisplay == .normal {
                     self.consume(usablePreselection, model: model)
                     return
@@ -280,9 +279,8 @@ final class SelectionService {
         refreshObservedSelection()
     }
 
-    /// AX round trips are paid by the whole host, so the observer reports
-    /// selection changes; the timer only notices a focus that moved and then
-    /// re-reads the element it already knows.
+    /// The AX observer reports selection changes. This timer only catches a
+    /// focus that moved, then re-reads the known element; round trips are costly.
     private func pollSelection() {
         guard let app = observedApplication else {
             refreshObservedSelection()

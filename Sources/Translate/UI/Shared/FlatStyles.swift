@@ -20,9 +20,8 @@ private enum ArrowCursorRegions {
     }
 }
 
-/// The input box's editor on a droplet panel: the first editable text view,
-/// since the menus' labels are not editable. Both panels put the caret in it
-/// when they open for typing.
+/// The input box's editable text view, not the menus' labels. Both panels use
+/// it to put the caret in place when they open for typing.
 @MainActor
 func firstEditor(in view: NSView) -> NSTextView? {
     if let text = view as? NSTextView, text.isEditable { return text }
@@ -34,10 +33,8 @@ func firstEditor(in view: NSView) -> NSTextView? {
 
 @MainActor
 class CursorAwareTextView: NSTextView {
-    /// The floating panel's boxes are text, not the card's face: a press on the
-    /// words selects them, and a press in the air around them places the caret
-    /// or does nothing. The panel drags from its own face, outside the boxes,
-    /// so the text view keeps its normal tracking here.
+    /// In the floating panel, words select and the air around them places the
+    /// caret; dragging the card starts outside the boxes.
     override func mouseDown(with event: NSEvent) {
         guard window is TranslationPanel else { return super.mouseDown(with: event) }
         let point = convert(event.locationInWindow, from: nil)
@@ -195,13 +192,6 @@ struct TranslateCircleStyle: ViewModifier {
     }
 }
 
-struct TranslatePillStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .buttonStyle(DroppyQuietButtonStyle(size: .small))
-    }
-}
-
 struct TranslateIconPillStyle: ViewModifier {
     var height: CGFloat
     var width: CGFloat?
@@ -225,10 +215,6 @@ extension View {
 
     func translateCircle(diameter: CGFloat) -> some View {
         modifier(TranslateCircleStyle(diameter: diameter))
-            .arrowCursorRegion()
-    }
-    func translatePill() -> some View {
-        modifier(TranslatePillStyle())
             .arrowCursorRegion()
     }
     func translateIconPill(height: CGFloat, width: CGFloat? = nil) -> some View {

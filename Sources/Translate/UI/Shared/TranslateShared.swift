@@ -141,6 +141,16 @@ struct LanguageMenu: View {
         Self.offered(model.languages, installed: availableIDs, current: selection.wrappedValue)
     }
 
+    private var pillLabel: some View {
+        PillLanguageLabel(
+            text: label,
+            highlighted: highlighted,
+            fontSize: fontSize,
+            alignment: alignment,
+            edgeInset: edgeInset
+        )
+    }
+
     private var menu: some View {
         Menu {
             if includesAuto {
@@ -158,24 +168,11 @@ struct LanguageMenu: View {
             }
         } label: {
             if inPillRow {
-                PillLanguageLabel(
-                    text: label,
-                    highlighted: highlighted,
-                    fontSize: fontSize,
-                    alignment: alignment,
-                    edgeInset: edgeInset
-                )
+                pillLabel
             } else if footerPill {
-                PillLanguageLabel(
-                    text: label,
-                    highlighted: highlighted,
-                    fontSize: fontSize,
-                    alignment: alignment,
-                    edgeInset: edgeInset
-                )
                 // The pill is as wide as its word, not the card: the label's
                 // stretch fills a half in the row, but here there is no half.
-                .fixedSize(horizontal: true, vertical: false)
+                pillLabel.fixedSize(horizontal: true, vertical: false)
             } else {
                 Text(label)
                     .foregroundStyle(AdaptiveColors.notchSurfacePrimaryText.opacity(0.92))
@@ -219,12 +216,9 @@ struct PanelMoreGlyph: View {
     }
 }
 
-/// Collapsed to a 3-dot disc; tapping slides capture/select/pin out beside it.
-/// The shelf fans the tools sideways; the edge panel, whose toolbar sits under
-/// the boxes, opens its menu above the disc and turns the dots upright. The
-/// disc never moves (the row's frame size changes), so show/hide is a glide.
-/// Pin toggles immediately: setHoldsOpen rebuilds the shelf and resets this
-/// view's state mid-slide.
+/// Collapsed to a 3-dot disc; tap slides capture/select/pin out. The shelf fans
+/// sideways, the edge panel opens upward. The disc stays put, so show/hide is a
+/// glide; pin toggles immediately because the host rebuild resets this view.
 struct ToolbarCapsule: View {
     /// Which way the tools fan out. The shelf keeps them beside the disc; the
     /// edge panel opens them upward from its footer.
@@ -340,10 +334,9 @@ struct ToolbarCapsule: View {
         )
     }
 
-    /// The panel's trigger: one round glass disc. Its menu is the card's own
-    /// overlay, so a wide menu never moves the footer. The pointer opens it;
-    /// a click only keeps it open, because the menu already follows the mouse.
-    /// The disc stays in sight under the open menu and turns its dots upright.
+    /// The panel's trigger: one round glass disc. Its menu overlays the card, so
+    /// a wide menu never moves the footer. Hover opens it and the disc stays in
+    /// sight, turning its dots upright.
     private var panelMore: some View {
         Button {
             if onMoreHover == nil {
@@ -470,10 +463,9 @@ struct ToolbarCapsule: View {
     }
 }
 
-/// The menu's glass as one piece: a rounded rectangle whose frame and corner
-/// radius run from the more disc's circle, covering it, to the menu's own
-/// rectangle. The whole shape lifts as it grows, so the menu slides out of the
-/// button instead of budding in place.
+/// The menu's glass, one footer taller than the menu so its seed lands on the
+/// disc below. At rest the extra strip is clear; while opening or closing it
+/// carries the glass out of the button.
 struct PanelMenuMorphShape: Shape {
     var progress: CGFloat
     /// The travel from the disc's bottom to the menu's: the footer's height.
@@ -512,10 +504,9 @@ struct PanelMenuMorphShape: Shape {
     }
 }
 
-/// The panel's more menu: one glass panel, one labeled row per tool. The panel's
-/// chip marks the row under the pointer, so the menu draws no glass of its own.
-/// The card draws it above the footer, so it never moves the controls and the
-/// more disc stays in sight under it.
+/// The panel's more menu: one glass panel, one labeled row per tool. The chip
+/// marks the row under the pointer, so the menu draws no glass of its own. It
+/// overlays the footer, so the controls never move.
 struct PanelMoreMenu: View {
     @ObservedObject var model: TranslateModel
     /// The footer keeps the menu mounted while it folds, so the glass can slide
@@ -718,9 +709,8 @@ private struct PanelMenuGlass: View, @MainActor Animatable {
                 .droppyGlassControlChrome(
                     shape: AnyShape(PanelMenuMorphShape(progress: progress, lift: lift))
                 )
-                // The disc's own glass is the first circle; the menu's glass
-                // joins it only once it has started to open, so the two never
-                // sit on top of each other.
+                // The disc's own glass comes first; the menu's joins once it
+                // starts opening, so the two never stack.
                 .opacity(Double(min(max(progress, 0) / 0.18, 1)))
         }
     }
@@ -818,10 +808,9 @@ struct TileIconButton: View {
     }
 }
 
-/// The seam wraps the swap button like a ring road around an island: both
-/// tiles cut concentric bites around the button's centre, joined to the
-/// straight seam by symmetric flares. `titleTab` adds a shallow dip on the top
-/// edge for the Translate label.
+/// The seam wraps the swap button: both tiles cut concentric bites around it,
+/// joined to the straight seam by symmetric flares. `titleTab` adds a shallow
+/// dip on the top edge for the Translate label.
 enum TileMetrics {
     static let cornerRadius: CGFloat = 15
 }
@@ -924,76 +913,36 @@ struct SeamNotchShape: Shape {
             }
         }
 
-        /// Bottom edge east→west, ending at the SW corner arc.
-        func bottomEdge() {
-            if edge == .bottom, nw > 0 {
-                ringPocket(into: &path, edgeY: maxY, cx: cx, radius: nw, offset: min(seamOffset, nw * 0.5), dipsDown: false)
-            }
-            path.addLine(to: CGPoint(x: minX + radius, y: maxY))
+        path.move(to: CGPoint(x: minX + radius, y: minY))
+        // The seam's pocket sits on the edge it runs along; the title dip only
+        // belongs to a surface with no seam at all.
+        if edge == .top, nw > 0 {
+            ringPocket(into: &path, edgeY: minY, cx: cx, radius: nw, offset: min(seamOffset, nw * 0.5), dipsDown: true)
         }
-
-        switch edge {
-        case .bottom:
-            path.move(to: CGPoint(x: minX + radius, y: minY))
-            path.addLine(to: CGPoint(x: maxX - radius, y: minY))
-            path.addCurve(to: CGPoint(x: maxX, y: minY + radius),
-                          control1: CGPoint(x: maxX - radius + k, y: minY),
-                          control2: CGPoint(x: maxX, y: minY + radius - k))
-            path.addLine(to: CGPoint(x: maxX, y: maxY - radius))
-            path.addCurve(to: CGPoint(x: maxX - radius, y: maxY),
-                          control1: CGPoint(x: maxX, y: maxY - radius + k),
-                          control2: CGPoint(x: maxX - radius + k, y: maxY))
-            bottomEdge()
-            path.addCurve(to: CGPoint(x: minX, y: maxY - radius),
-                          control1: CGPoint(x: minX + radius - k, y: maxY),
-                          control2: CGPoint(x: minX, y: maxY - radius + k))
-            path.addLine(to: CGPoint(x: minX, y: minY + radius))
-            path.addCurve(to: CGPoint(x: minX + radius, y: minY),
-                          control1: CGPoint(x: minX, y: minY + radius - k),
-                          control2: CGPoint(x: minX + radius - k, y: minY))
-            path.closeSubpath()
-        case .top:
-            path.move(to: CGPoint(x: minX + radius, y: minY))
-            if nw > 0 {
-                ringPocket(into: &path, edgeY: minY, cx: cx, radius: nw, offset: min(seamOffset, nw * 0.5), dipsDown: true)
-            }
-            path.addLine(to: CGPoint(x: maxX - radius, y: minY))
-            path.addCurve(to: CGPoint(x: maxX, y: minY + radius),
-                          control1: CGPoint(x: maxX - radius + k, y: minY),
-                          control2: CGPoint(x: maxX, y: minY + radius - k))
-            path.addLine(to: CGPoint(x: maxX, y: maxY - radius))
-            path.addCurve(to: CGPoint(x: maxX - radius, y: maxY),
-                          control1: CGPoint(x: maxX, y: maxY - radius + k),
-                          control2: CGPoint(x: maxX - radius + k, y: maxY))
-            path.addLine(to: CGPoint(x: minX + radius, y: maxY))
-            path.addCurve(to: CGPoint(x: minX, y: maxY - radius),
-                          control1: CGPoint(x: minX + radius - k, y: maxY),
-                          control2: CGPoint(x: minX, y: maxY - radius + k))
-            path.addLine(to: CGPoint(x: minX, y: minY + radius))
-            path.addCurve(to: CGPoint(x: minX + radius, y: minY),
-                          control1: CGPoint(x: minX, y: minY + radius - k),
-                          control2: CGPoint(x: minX + radius - k, y: minY))
-            path.closeSubpath()
-        case nil:
-            path.move(to: CGPoint(x: minX + radius, y: minY))
+        if edge == nil {
             topEdge()
-            path.addCurve(to: CGPoint(x: maxX, y: minY + radius),
-                          control1: CGPoint(x: maxX - radius + k, y: minY),
-                          control2: CGPoint(x: maxX, y: minY + radius - k))
-            path.addLine(to: CGPoint(x: maxX, y: maxY - radius))
-            path.addCurve(to: CGPoint(x: maxX - radius, y: maxY),
-                          control1: CGPoint(x: maxX, y: maxY - radius + k),
-                          control2: CGPoint(x: maxX - radius + k, y: maxY))
-            path.addLine(to: CGPoint(x: minX + radius, y: maxY))
-            path.addCurve(to: CGPoint(x: minX, y: maxY - radius),
-                          control1: CGPoint(x: minX + radius - k, y: maxY),
-                          control2: CGPoint(x: minX, y: maxY - radius + k))
-            path.addLine(to: CGPoint(x: minX, y: minY + radius))
-            path.addCurve(to: CGPoint(x: minX + radius, y: minY),
-                          control1: CGPoint(x: minX, y: minY + radius - k),
-                          control2: CGPoint(x: minX + radius - k, y: minY))
-            path.closeSubpath()
+        } else {
+            path.addLine(to: CGPoint(x: maxX - radius, y: minY))
         }
+        path.addCurve(to: CGPoint(x: maxX, y: minY + radius),
+                      control1: CGPoint(x: maxX - radius + k, y: minY),
+                      control2: CGPoint(x: maxX, y: minY + radius - k))
+        path.addLine(to: CGPoint(x: maxX, y: maxY - radius))
+        path.addCurve(to: CGPoint(x: maxX - radius, y: maxY),
+                      control1: CGPoint(x: maxX, y: maxY - radius + k),
+                      control2: CGPoint(x: maxX - radius + k, y: maxY))
+        if edge == .bottom, nw > 0 {
+            ringPocket(into: &path, edgeY: maxY, cx: cx, radius: nw, offset: min(seamOffset, nw * 0.5), dipsDown: false)
+        }
+        path.addLine(to: CGPoint(x: minX + radius, y: maxY))
+        path.addCurve(to: CGPoint(x: minX, y: maxY - radius),
+                      control1: CGPoint(x: minX + radius - k, y: maxY),
+                      control2: CGPoint(x: minX, y: maxY - radius + k))
+        path.addLine(to: CGPoint(x: minX, y: minY + radius))
+        path.addCurve(to: CGPoint(x: minX + radius, y: minY),
+                      control1: CGPoint(x: minX, y: minY + radius - k),
+                      control2: CGPoint(x: minX + radius - k, y: minY))
+        path.closeSubpath()
         return path
     }
 }
@@ -1115,17 +1064,9 @@ extension NSTextView {
     }
 }
 
-/// Keeps a shown panel's glass on its active face for as long as it is up.
-///
-/// macOS frosts every Liquid Glass layer in a window that is not key, and the
-/// card keeps showing long after the user has moved to another app. Releasing
-/// the appearance while the card is still on screen makes it flip to frost
-/// under the pointer, so the pin only decides whether it stays open — not how
-/// it looks. `acquireKeyAppearance` is the appearance AppKit gives its own
-/// menus in the same situation: the glass turns clear without the panel taking
-/// the keyboard from the app the user is working in. There is no public
-/// equivalent; the selector is guarded, so an OS without it keeps the system's
-/// inactive face.
+/// Keeps an open panel's glass bright while another app has the keyboard:
+/// `acquireKeyAppearance` clears macOS's frost for a non-key window without
+/// taking focus. Private selector, so older systems keep the inactive face.
 @MainActor
 final class PanelKeyAppearance {
     private unowned let panel: NSWindow
@@ -1135,9 +1076,8 @@ final class PanelKeyAppearance {
         self.panel = panel
     }
 
-    /// The pin decides whether the card stays open, never how it looks: an open
-    /// card keeps the face it had while pinned, so unpinning does not frost it
-    /// under the pointer. It is released only when the card folds or hides.
+    /// The pin decides whether the card stays open, not how it looks: an open
+    /// card keeps its face. It is released only when the card folds or hides.
     static func shouldHold(pinned: Bool, shown: Bool) -> Bool {
         shown
     }
@@ -1157,12 +1097,9 @@ final class PanelKeyAppearance {
     }
 }
 
-/// Puts back the light the system takes out of glass when its window is not
-/// key. When the key appearance cannot be held — an OS without the selector,
-/// or the moment before the hold lands — macOS dims every glass layer in the
-/// window by a flat 24/255; the same lift returns the card to the face it
-/// wears while it is focused. Only the window decides this, so the panel reads
-/// `appearsActive` rather than the app's own state.
+/// Restores the light macOS removes from glass in a non-key window when
+/// `acquireKeyAppearance` is unavailable: every glass layer dims by a flat
+/// 24/255. Read `appearsActive`, not the app's state.
 struct PanelGlassLift: ViewModifier {
     @Environment(\.appearsActive) private var appearsActive
     @StateObject private var theme = HostThemeStore()
@@ -1199,8 +1136,7 @@ extension View {
 
     /// The language row's raised hover capsule, reused on the panel's boxes.
     /// It sits above the tile's glass and under the text: glass over glass
-    /// disappears, so it takes the kit's hover wash instead. The wash takes the
-    /// tile's own shape and corner, so it reads as the box lighting up.
+    /// disappears, so it uses the kit's hover wash in the tile's own shape.
     func tileHoverChrome(
         _ hovering: Bool,
         cornerRadius: CGFloat,

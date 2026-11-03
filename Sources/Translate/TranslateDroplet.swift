@@ -37,7 +37,7 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
         capture.attach(host: host, model: model)
         selection.attach(host: host, model: model)
         // The floating panel's more menu uses the same capture and selection
-        // actions as the edge panel; the droplet owns the services.
+        // actions as the edge panel; the droplet creates the services.
         TranslationPanel.shared.configure(
             requestCapture: { [weak self] in self?.capture.requestRegion() },
             requestSelection: { [weak self] in self?.selection.requestSelection() },
@@ -86,10 +86,8 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
         host = nil
     }
 
-    /// The three ways to start a translation without the shelf, all also shelf
-    /// buttons. Declared here so Droppy's Shortcuts page can show them. Every
-    /// default is nil: the user picks, and the host drops a suggestion that
-    /// collides with an existing binding.
+    /// The three shelf actions, also exposed on Droppy's Shortcuts page.
+    /// Defaults are nil: the host drops a suggestion that collides.
     private func registerShortcuts(host: DropletHost) {
         host.shortcuts.register(
             id: "select-text",

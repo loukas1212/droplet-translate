@@ -97,9 +97,6 @@ struct TranslateSettings: View {
 struct TranslateTranslationSettings: View {
     @ObservedObject var model: TranslateModel
     @State private var isKeyVisible = false
-    /// Nil on a host that cannot open a page; the guide is then part of this
-    /// page.
-    @Environment(\.dropletSettingsPageOpener) private var pageOpener
 
     var body: some View {
         DropletSettingsPage { sections }
@@ -587,9 +584,8 @@ struct TranslatePermissionsSettings: View {
         }
     }
 
-    /// A granted right needs no control: the check is the whole message. A
-    /// right the user refused can only be fixed in System Settings, so the
-    /// button says where it goes.
+    /// A granted right needs no control. A refused one can only be fixed in
+    /// System Settings, so the button says where it goes.
     private func permissionRow(_ state: TranslateModel.PermissionState) -> some View {
         TranslateLabeledRow(
             title: L10n.tr(state.titleKey),
@@ -641,9 +637,6 @@ struct TranslatePermissionsSettings: View {
 
 struct TranslateHelpSettings: View {
     @ObservedObject var model: TranslateModel
-    /// Nil on a host that cannot open a page; the guide then joins the long
-    /// page with no toolbar of its own.
-    @Environment(\.dropletSettingsPageOpener) private var pageOpener
 
     var body: some View {
         DropletSettingsPage { sections }
@@ -823,9 +816,8 @@ struct SettingsPageTile: View {
     }
 }
 
-/// At `DropletSettingsPageLink`'s metrics, but with room for a trailing
-/// summary: the permissions state is why the row exists. A door that leaves
-/// the droplet points out rather than in.
+/// At `DropletSettingsPageLink`'s metrics, with room for a trailing summary:
+/// the permission state is why the row exists.
 struct SettingsDoorRow: View {
     let title: String
     let subtitle: String
@@ -1003,10 +995,8 @@ struct TranslateRowLabel: View {
     }
 }
 
-/// The switch is the row: a `Toggle` inside `LabeledContent` becomes a check
-/// box, and the Form styles only a top-level `Toggle` as a switch.
-/// System Settings writes the state beside the switch rather than leaving
-/// the switch to be read on its own.
+/// The switch is the row: a `Toggle` in `LabeledContent` becomes a check box,
+/// so this uses a top-level `Toggle` with the state written beside it.
 struct TranslateToggleRow: View {
     let title: String
     var subtitle: String?

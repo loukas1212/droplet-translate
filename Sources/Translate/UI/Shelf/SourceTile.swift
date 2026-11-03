@@ -2,12 +2,8 @@ import AppKit
 import DroppyKit
 import SwiftUI
 
-/// The input half of the shelf.
-///
-/// SwiftUI's TextEditor wraps by word, so a long Thai run with no spaces grows
-/// sideways into a horizontal scroll. This NSTextView wraps by character
-/// instead. Geometry mirrors the result box: full width, 5pt leading indent,
-/// and 44pt insets unless the edge panel trims the top.
+/// The input half of the shelf. It wraps by character where `TextEditor` wraps
+/// by word, so unspaced Thai does not grow sideways.
 @MainActor
 private struct ScrollableTextEditor: NSViewRepresentable {
     @Binding var text: String
@@ -61,10 +57,8 @@ private struct ScrollableTextEditor: NSViewRepresentable {
         textView.textColor = .labelColor
         textView.insertionPointColor = .labelColor
 
-        // Top inset by default like the result box; the edge panel trims it so a short
-        // box does not push its single line to the bottom. The leading 5pt comes
-        // from a paragraph indent so the text container can track the viewport
-        // width.
+        // The edge panel trims the top inset so a short box does not push its
+        // line down. The 5pt leading indent lets the container track width.
         textView.textContainerInset = NSSize(width: 0, height: topInset)
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
@@ -213,16 +207,14 @@ final class InputScrollView: NSScrollView {
             textView.setFrameSize(NSSize(width: width, height: documentHeight))
         }
         // A knob only when there is something to scroll to. While a host
-        // animates the box toward the text's height, the cap decides, not the
-        // half-grown frame.
+        // animates the box, the cap decides, not the half-grown frame.
         let overflowHeight = scrollsWhenTallerThan ?? contentSize.height
         let overflows = textHeight > overflowHeight + 0.5
         if hasVerticalScroller != overflows {
             hasVerticalScroller = overflows
         }
-        // The text view scrolls the caret into view on every new line. While the
-        // box still fits its text, that scroll rides the box's growth and bobs
-        // the words; pin the clip to the top until the text outgrows the cap.
+        // The caret is scrolled into view on every new line, but while the text
+        // fits, that rides the box's growth and bobs the words; pin it to the top.
         if !overflows, contentView.bounds.origin.y != 0 {
             contentView.scroll(to: .zero)
         }

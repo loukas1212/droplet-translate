@@ -45,8 +45,6 @@ enum PairInfo: Equatable {
     case ready
     case needsDownload
     case unsupported
-
-    var canDownload: Bool { self == .needsDownload || self == .unknown }
 }
 
 enum CaptureState: Equatable {
@@ -83,8 +81,8 @@ final class TranslateModel: ObservableObject {
     static let auto = "auto"
     static let english = "en"
 
-    /// Past this the translation takes minutes, and a shelf is not the place
-    /// to wait. Not a setting: it is what the engine can answer.
+    /// Apple's engine slows to minutes past this, too long for a shelf.
+    /// Fixed, not a setting.
     static let maxInputLength = 5000
 
     /// A stored value, preferring the current key over the one the setting
@@ -255,7 +253,7 @@ final class TranslateModel: ObservableObject {
         }
     }
 
-    /// Follows the provider and the models, so there is one truth, not two.
+    /// Derived from the provider and the quality, never stored separately.
     var translationEngine: TranslationEngine {
         guard translationProvider == .apple else { return .provider }
         return translationQuality == .fast ? .classic : .appleIntelligence
@@ -571,7 +569,7 @@ final class TranslateModel: ObservableObject {
     /// drag selection finishes while the translation is still running.
     private var pendingResultReveal: ShelfWidgetID?
     /// The host does not report this widget's card as expanded, so the view's
-    /// own lifecycle is the truth here.
+    /// lifecycle is the only signal.
     private var isShelfWidgetVisible = false
     private var isDeactivating = false
     private var shelfWidgetToReveal: ShelfWidgetID?
@@ -857,10 +855,8 @@ final class TranslateModel: ObservableObject {
 
         status = .translating
         outputScrollResetToken = UUID()
-        // The panel is for a finished result, not progress: close the old one
-        // instead of replacing it with a spinner. An empty card keeps its
-        // face: the grip that starts the translation is on it, and folding
-        // the card away would drop the drag.
+        // A panel is for finished results, not progress: close the old one
+        // and keep an empty card, whose grip starts the translation.
         if !output.isEmpty {
             TranslationPanel.shared.closePanel()
         }
@@ -1906,11 +1902,8 @@ final class TranslateModel: ObservableObject {
         }
     }
 
-    /// Capture and selection can finish while the shelf animates away; defer
-    /// the host request until it is gone instead of losing it.
-    ///
-    /// Only the chosen Display mode receives the result; the shelf reads the
-    /// model itself, so normal has nothing to present.
+    /// Defers the host request while the shelf animates away, so a result that
+    /// lands mid-close is not lost. Normal mode reads the model directly.
     private func presentResultInSelectedDestination() {
         guard !output.isEmpty else { return }
         guard !captureShelfDismissalInProgress else {
@@ -2030,10 +2023,8 @@ final class TranslateModel: ObservableObject {
         host?.workspace.openSettings()
     }
 
-    /// Closes what covers the desktop and opens the page where the system's
-    /// language sheet can be seen. Settings opens first: folding the panel
-    /// hands the foreground back to the app behind it, and Settings would
-    /// follow the panel into the background.
+    /// Opens Settings before folding the panels: folding hands the foreground
+    /// to the app behind, and Settings would follow it into the background.
     func openLanguageDownloadSettings() {
         let opened = host?.workspace.openSettingsPage(
             TranslateSettingsPage.translation.rawValue,

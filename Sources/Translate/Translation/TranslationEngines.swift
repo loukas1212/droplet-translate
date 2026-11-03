@@ -40,13 +40,6 @@ enum TranslationProvider: String, CaseIterable, Identifiable, Sendable {
 
     static var aiCases: [TranslationProvider] { allCases.filter { $0 != .apple } }
 
-    var leavesTheDevice: Bool {
-        switch self {
-        case .apple, .ollama: return false
-        case .openAI, .anthropic, .gemini, .custom: return true
-        }
-    }
-
     var needsKey: Bool {
         switch self {
         case .apple, .ollama: return false
@@ -91,9 +84,8 @@ enum TranslationProvider: String, CaseIterable, Identifiable, Sendable {
 /// The network engine names the provider it would use, so its label has to
 /// follow the provider rather than its own case.
 extension TranslationEngine {
-    /// The catalog key that names this engine. While Apple's models are active
-    /// the network engine has no provider yet, so it keeps the generic label
-    /// instead of asking for a key that does not exist.
+    /// The catalog key for this engine. While Apple's models are active the
+    /// network engine has no provider, so it uses its generic label.
     func nameKey(provider: TranslationProvider) -> String {
         let name = self == .provider && provider != .apple ? provider.rawValue : rawValue
         return "settings.engine.\(name)"

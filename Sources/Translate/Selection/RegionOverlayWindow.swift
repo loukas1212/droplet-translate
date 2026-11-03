@@ -77,9 +77,8 @@ private struct RegionPickerView: View {
     }
 }
 
-/// Droppy runs in the background, so the first press on a window it opens is
-/// usually the one that activates the app. Without this, that press only
-/// brings Droppy forward and the drag that should start the selection is lost.
+/// Droppy runs in the background, so the first press on its window activates
+/// the app. Accepting the first mouse keeps that press for the selection drag.
 private final class RegionPickerHostingView: NSHostingView<RegionPickerView> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -98,10 +97,8 @@ final class RegionOverlayWindow: NSWindow {
             defer: false
         )
         isReleasedWhenClosed = false
-        // Above every window the host draws, including the shelf panel. The
-        // card is still animating out when the picker appears, and a picker
-        // under it would swallow the first click and show the fading card
-        // as a dark patch over the dim.
+        // Above every host window, including the shelf panel: the shelf is
+        // still animating out, and one over the picker would eat the first click.
         let hostTop = NSApp.windows
             .filter { $0 !== self }
             .map(\.level.rawValue)

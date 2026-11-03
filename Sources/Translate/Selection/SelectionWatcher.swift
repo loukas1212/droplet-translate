@@ -12,8 +12,6 @@ final class SelectionWatcher {
     private var readID = UUID()
     private var mouseIsDown = false
 
-    var isMouseDown: Bool { mouseIsDown }
-
     @discardableResult
     func start(
         sourcePID: pid_t,

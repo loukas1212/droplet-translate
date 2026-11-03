@@ -1,10 +1,8 @@
 import Foundation
 import Security
 
-/// The API key, in the keychain.
-///
-/// A droplet runs inside the host's process, so the key is written under the
-/// host's identity rather than its plain-text preferences. Never log it.
+/// The API key, in the keychain. A droplet runs in the host's process, so the
+/// key is stored under the host's identity. Never put it in preferences or logs.
 enum KeychainStore {
     private static let service = "app.getdroppy.droplet.translate"
 

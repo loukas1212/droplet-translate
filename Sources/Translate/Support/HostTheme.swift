@@ -2,15 +2,9 @@ import AppKit
 import Combine
 import Foundation
 
-/// The surface theme the user picked in Droppy for the shelf and the
-/// droplet's own panels.
-///
-/// DroppyKit draws the host's surfaces in the theme but does not publish which
-/// one is on — `surfaceAppearance` is only dark or light — so the droplet reads
-/// the host's own setting. Droppy keeps one theme for the notch surface and one
-/// for the shelf and floating surfaces. This droplet draws only the second
-/// kind; the host draws the notch. Reading the notch key here made the preview
-/// follow the notch while the shelf stayed on its own theme.
+/// The surface theme the user picked in Droppy for the shelf and panels.
+/// DroppyKit publishes only dark or light, so read the host's setting with
+/// `externalSurfaceAppearance`, not the notch key: the two can differ.
 enum HostTheme: String, Equatable {
     case black
     case liquidGlass
@@ -23,10 +17,8 @@ enum HostTheme: String, Equatable {
     }
 }
 
-/// Redraws the card when the host's theme changes, so a theme picked in Droppy
-/// reaches a card that is already on screen. The host's own notification is
-/// the first signal; the defaults and a slow poll catch a host that writes the
-/// preference without announcing it.
+/// Redraws open cards when Droppy's theme changes. The host's notification is
+/// the main signal; defaults and a slow poll catch a silent write.
 final class HostThemeStore: ObservableObject {
     /// The theme the host is drawing its surfaces in now.
     @Published private(set) var current = HostTheme.read()

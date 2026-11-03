@@ -3,9 +3,8 @@ import NaturalLanguage
 import SwiftUI
 import Translation
 
-// Everything that touches Apple's Translation framework lives in this file.
-// The framework needs macOS 15, the package targets macOS 14, so every use is
-// gated and no other file imports Translation.
+// Apple's Translation framework needs macOS 15, the package targets macOS 14.
+// Keep every use gated here so no other file imports it.
 
 enum PairStatus: Equatable, Sendable {
     case installed
@@ -155,10 +154,9 @@ enum TranslationBridge {
         }
     }
 
-    /// An equal configuration does nothing until it is invalidated; setting one
-    /// is what starts a `translationTask`. The approach is part of the identity
-    /// but the framework does not expose it, so the caller passes it in; a
-    /// different approach needs a new configuration or the setting is ignored.
+    /// Setting a configuration starts a `translationTask`; an equal one does
+    /// nothing until invalidated. The approach is part of the identity but the
+    /// framework does not expose it, so the caller passes it in.
     static func configuration(
         replacing current: TranslationSession.Configuration?,
         builtWith currentApproach: TranslationApproach?,
@@ -211,9 +209,8 @@ private func nextConfig(
 
 @available(macOS 26.0, *)
 extension TranslationBridge {
-    /// The fastest answer the system can give: the default strategy spends
-    /// about twenty seconds on a long text; low latency answers it in a
-    /// fraction of that.
+    /// The fastest answer the system can give: low latency answers long text in
+    /// a fraction of the default strategy's ~20 seconds.
     static func makeSession(
         source: Locale.Language,
         target: Locale.Language,

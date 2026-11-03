@@ -12,8 +12,7 @@ struct TranslateWidget: View {
     /// The grouped shelf slot is 230pt wide; the language row shrinks with it.
     var rowWidth = SidePanelContentView.defaultRowWidth
     /// What the host spends above and below the widget's rectangle: the notch
-    /// card's corner inset, 0 on a solo island card. The descriptor's height
-    /// includes it, so the report adds it back.
+    /// corner inset, or 0 on a solo island card. The descriptor includes it.
     var shelfHeightBudget: CGFloat = SidePanelContentView.shelfContentInsetBudget
     /// Asks the host for a card height. The content reports the rectangle it
     /// needs; the widget adds the host's inset budget.

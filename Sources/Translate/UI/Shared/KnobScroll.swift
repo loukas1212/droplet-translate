@@ -93,9 +93,8 @@ final class KnobOnlyScroller: NSScroller {
         scheduleFade()
     }
 
-    /// Waits, then fades only if the pointer is really away; if it is still
-    /// there, check again so a missed mouseExited cannot leave it at full
-    /// opacity.
+    /// Waits, then fades only if the pointer is really away. A missed
+    /// `mouseExited` is caught by checking again instead of trusting one event.
     private func scheduleFade() {
         fadeTask?.cancel()
         fadeTask = Task { @MainActor [weak self, fadeDelay] in
@@ -119,9 +118,8 @@ final class KnobOnlyScroller: NSScroller {
     }
 }
 
-/// Keeps a text view from scrolling sideways. The text wraps by character, so
-/// a wide document is always a layout mistake, and a horizontal offset makes
-/// the words jump when the viewport is resized.
+/// Keeps a text view from scrolling sideways. Text wraps by character, so a
+/// horizontal offset only makes the words jump when the viewport resizes.
 final class VerticalOnlyClipView: NSClipView {
     override func constrainBoundsRect(_ proposedBounds: NSRect) -> NSRect {
         var bounds = super.constrainBoundsRect(proposedBounds)
@@ -139,7 +137,7 @@ final class InsetScrollView: NSScrollView {
     var scrollerBottomInset: CGFloat = 0 {
         didSet { if oldValue != scrollerBottomInset { tile() } }
     }
-    /// False when a host owns the knob's visibility; the shared output views
+    /// False when a host controls the knob's visibility; the shared output views
     /// let the scroll view show it only while there is overflow.
     var managesKnobVisibility = true
 
@@ -182,15 +180,13 @@ final class InsetScrollView: NSScrollView {
         if abs(textView.frame.height - documentHeight) > 0.5 {
             textView.setFrameSize(NSSize(width: width, height: documentHeight))
         }
-        // The knob is there only when there is something to reach. A knob on
-        // text that fits invites a scroll that only rubber-bands and snaps
-        // back, which reads as the box shaking.
+        // Show the knob only when there is something to reach; on text that
+        // fits, it invites a rubber-band scroll that reads as shaking.
         guard managesKnobVisibility else { return }
         let overflows = textHeight > contentSize.height + 0.5
         if hasVerticalScroller != overflows {
-            // Showing the knob narrows the content, and AppKit keeps a small
-            // scroll offset from the old width. A box at its top must stay
-            // there, or the first line is cut the moment the box opens.
+            // Showing the knob narrows the content and AppKit may keep an old
+            // offset; a box at its top must stay there.
             let staysAtTop = contentView.bounds.origin.y <= 0.5
             hasVerticalScroller = overflows
             if staysAtTop, contentView.bounds.origin.y != 0 {
@@ -200,92 +196,6 @@ final class InsetScrollView: NSScrollView {
         if !overflows, contentView.bounds.origin.y != 0 {
             contentView.scroll(to: .zero)
         }
-    }
-}
-
-/// The knob-only scroller for SwiftUI content. `showsScroller` hides it,
-/// `resetToken` scrolls to top, and the insets keep the knob clear of overlay
-/// buttons.
-@MainActor
-struct KnobScrollView<Content: View>: NSViewRepresentable {
-    var showsScroller: Bool
-    var resetToken: String
-    var scrollerTopInset: CGFloat
-    var scrollerBottomInset: CGFloat
-    let content: Content
-
-    init(showsScroller: Bool,
-         resetToken: String,
-         scrollerTopInset: CGFloat = 0,
-         scrollerBottomInset: CGFloat = 0,
-         @ViewBuilder content: () -> Content) {
-        self.showsScroller = showsScroller
-        self.resetToken = resetToken
-        self.scrollerTopInset = scrollerTopInset
-        self.scrollerBottomInset = scrollerBottomInset
-        self.content = content()
-    }
-
-    func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = InsetScrollView()
-        scrollView.scrollerTopInset = scrollerTopInset
-        scrollView.scrollerBottomInset = scrollerBottomInset
-        scrollView.managesKnobVisibility = false
-        scrollView.contentView = VerticalOnlyClipView()
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.verticalScroller = KnobOnlyScroller()
-        scrollView.hasVerticalScroller = showsScroller
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = false
-        scrollView.verticalScrollElasticity = .allowed
-        scrollView.horizontalScrollElasticity = .none
-
-        let hosting = NSHostingView(rootView: content)
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-        hosting.sizingOptions = [.intrinsicContentSize]
-        scrollView.documentView = hosting
-
-        let clip = scrollView.contentView
-        NSLayoutConstraint.activate([
-            hosting.topAnchor.constraint(equalTo: clip.topAnchor),
-            hosting.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: clip.trailingAnchor)
-        ])
-
-        context.coordinator.hosting = hosting
-        context.coordinator.lastToken = resetToken
-        return scrollView
-    }
-
-    func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.hosting?.rootView = content
-
-        if let inset = scrollView as? InsetScrollView {
-            inset.scrollerTopInset = scrollerTopInset
-            inset.scrollerBottomInset = scrollerBottomInset
-        }
-
-        if showsScroller, !(scrollView.verticalScroller is KnobOnlyScroller) {
-            scrollView.verticalScroller = KnobOnlyScroller()
-        }
-        if scrollView.hasVerticalScroller != showsScroller {
-            scrollView.hasVerticalScroller = showsScroller
-        }
-
-        if context.coordinator.lastToken != resetToken {
-            context.coordinator.lastToken = resetToken
-            scrollView.contentView.scroll(to: .zero)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    @MainActor
-    final class Coordinator {
-        var hosting: NSHostingView<Content>?
-        var lastToken = ""
     }
 }
 

@@ -3,21 +3,16 @@ import DroppyKit
 import QuartzCore
 import SwiftUI
 
-/// The card's outline, published so the glass layer can be masked to it.
-///
-/// The surface is a material: it would fill the whole window if it were not
-/// clipped, and the card's edge is the edge of the screen.
+/// The card's outline, published for masking the glass layer. The material
+/// fills the whole window unless clipped; the card edge is the screen edge.
 final class SidePanelSurfaceState: ObservableObject {
     @Published var silhouette = Path()
     /// Mirrors the rim's fade to the left edge when the panel docks left.
     @Published var mirrored = false
 }
 
-/// The handle's amount: how far its lobe hangs out of the card's edge.
-///
-/// The lobe is part of the card's own path, so the card's surface covers the
-/// card and the lobe in one layer, and the colour never breaks between them.
-/// The mark on the lobe rides the same amount, so it stays on the lobe.
+/// How far the handle's lobe hangs out of the card edge. The lobe is part of
+/// the card's path, so the surface and its mark stay one piece.
 final class SidePanelGripState: ObservableObject {
     @Published var amount: CGFloat = 0
 }
@@ -29,12 +24,9 @@ final class SidePanelPinState: ObservableObject {
     @Published var isPinned = false
 }
 
-/// The card's face in the theme the user picked in Droppy.
-///
-/// Black is a solid card, Liquid Glass is the system's clear glass, and
-/// Dynamic Glass is black melting into that glass. The glass is drawn on the
-/// card's own outline, so its rim is the card's edge and nothing else sits
-/// under it.
+/// The card's face in Droppy's theme: black, Liquid Glass, or Dynamic Glass
+/// (black melting into glass). The glass uses the card's own outline, so its
+/// rim is the card's edge.
 struct SidePanelCardSurface: View {
     let shape: AnyShape
     var mirrored = false
@@ -81,10 +73,8 @@ struct SidePanelCardSurface: View {
         )
     }
 
-    /// The shelf's edge, drawn inside the card so the window's edge cannot cut
-    /// it in half. The host's own shelf has a thin dark line and no bright rim,
-    /// so the glass keeps the same hairline instead of a white outline. It
-    /// fades out at the screen edge, where the card is not free-standing.
+    /// The shelf's edge, drawn inside the card so the window cannot cut it.
+    /// A thin dark hairline like Droppy's shelf, fading out at the screen edge.
     private var rim: some View {
         GeometryReader { geo in
             // The fade belongs to the screen edge, so it scales with the
@@ -141,15 +131,13 @@ struct SidePanelSurfaceLayer: View {
 
 /// The small tab the droplet keeps on the right edge of the screen.
 ///
-/// DroppyKit has no side-panel surface: the host draws the notch and the
-/// shelf, so an edge tab is the droplet's own window, like `TranslationPanel`.
+/// DroppyKit has no side-panel surface, so this is the droplet's own window.
 @MainActor
 final class SidePanel: NSPanel {
     static let shared = SidePanel()
 
-    /// The edge tab at rest: depth into the screen and height. Both grow by
-    /// about a fifth under the pointer, so the grown tab keeps the resting
-    /// proportions instead of turning fat.
+    /// The edge tab at rest. Both dimensions grow about a fifth on hover, so
+    /// the grown tab keeps its proportions.
     static let width: CGFloat = 18
     static let height: CGFloat = 160
 
@@ -157,16 +145,13 @@ final class SidePanel: NSPanel {
     static let hoverWidth: CGFloat = 22
     static let hoverHeight: CGFloat = 192
 
-    /// The window keeps a 32pt width so the pointer has a comfortable target;
-    /// the shape sits flush with the screen edge inside it. Its size never
-    /// changes under the cursor, so the hover cannot flicker.
+    /// The window keeps a 32pt width for a comfortable pointer target; the shape
+    /// sits flush with the screen edge. Its size never changes on hover.
     static let windowWidth: CGFloat = 32
     static let windowHeight = hoverHeight
 
-    /// The pressed tab is the canvas the translation result will be laid out in,
-    /// so it takes the boxes' width and the shelf's side margin. Its height
-    /// follows the text box; the extra on each side is the flare that melts
-    /// each edge-side corner into the screen edge.
+    /// The pressed tab's width: the boxes plus the side margins. Its height
+    /// follows the text box; the extra width is the flare into the screen edge.
     static let expandedWidth: CGFloat =
         SidePanelContentView.boxWidth + SidePanelContentView.sideInset * 2
 
@@ -228,7 +213,7 @@ final class SidePanel: NSPanel {
     private let chip = SidePanelChipState()
     /// The handle's amount, shared with the content so its mark rides the lobe.
     private let grip = SidePanelGripState()
-    /// The card's own pin; the menu reads it and the window answers it.
+    /// The card's own pin; the menu sets it and the window follows it.
     private let pin = SidePanelPinState()
     /// The glass's active face while a pinned card is not the key window.
     private lazy var keyAppearance = PanelKeyAppearance(panel: self)
@@ -304,10 +289,9 @@ final class SidePanel: NSPanel {
             + (t3 - t2) * endSlope
     }
 
-    /// How far the fold takes the tab under its own size, how fast the card
-    /// leaves, in reveal per phase, and the turn that joins the two beats. The
-    /// fold plays the curve from the card down, so the settle owns the first
-    /// slice of the phase and the shrink the rest.
+    /// The fold's constants: how far the tab shrinks past its own size, the
+    /// card's exit speed, and the turn between the two beats. The fold runs the
+    /// curve backwards, so the settle comes first and the shrink after.
     static let foldSquash: CGFloat = 0.12
     static let foldStartSlope: CGFloat = 2.2
     static var foldTurn: CGFloat { CGFloat(foldSettleDuration / foldDuration) }
@@ -344,10 +328,9 @@ final class SidePanel: NSPanel {
     /// The tab's own growth: a 150ms ease-out that answers the pointer, not a
     /// click. The grip leaves first, then the icon arrives.
     private static let hoverDuration: CFTimeInterval = 0.15
-    /// The handle's lobe leaves the card's edge in the same beat as the tab's
-    /// own growth, so the card and the lobe keep one shape while it moves.
-    /// A critically damped spring, so the lobe eases out and settles without a
-    /// bounce: the card is one piece, and a piece that snaps looks broken.
+    /// The lobe leaves with the tab's growth, so the card stays one shape.
+    /// Critically damped: easing out without a bounce, because a piece that
+    /// snaps looks broken.
     private static let gripSpring = (response: 0.36, damping: 1.0)
     /// The body's own approach: a touch quicker than the content's scale, so
     /// the window's edge never trails the footer while a box grows.
@@ -388,10 +371,9 @@ final class SidePanel: NSPanel {
     var tabHeight: CGFloat {
         Self.height + (Self.hoverHeight - Self.height) * hoverAmount
     }
-    /// The card's face, in the tab view's coordinates. Once the card is open
-    /// it comes from the body the content is laid out in, not from the window:
-    /// AppKit rounds a window frame to whole points, and half a point there
-    /// leaves the grip's sides a pixel off the card's edge.
+    /// The card's face height in the tab view's coordinates. When open it comes
+    /// from the content's body, not the window: AppKit rounds window frames to
+    /// whole points, which would leave the grip a pixel off the card edge.
     var faceHeight: CGFloat {
         let windowHeight = reveal >= 1
             ? Self.windowHeight(forBody: bodyHeight)
@@ -560,19 +542,15 @@ final class SidePanel: NSPanel {
         makeClickable()
     }
 
-    /// Gives the window back its clicks.
-    ///
-    /// Droppy leaves a droplet's window with its event mask off while the app
-    /// runs in the background: the pointer enters the tab, but the click falls
-    /// through to the app below and AppKit still reports `ignoresMouseEvents`
-    /// as false. A set to false alone changes nothing, so the flag is pushed
-    /// through one change; the second call then sends a live mask.
+    /// Gives the window back its clicks. Droppy leaves a droplet's window with
+    /// its event mask off in the background, and AppKit still reports
+    /// `ignoresMouseEvents` as false. Toggle the flag once to send a live mask.
     fileprivate func makeClickable() {
         ignoresMouseEvents = true
         ignoresMouseEvents = false
     }
 
-    /// A pinned card is the one window the user still owns in the background.
+    /// A pinned card keeps its clicks while the user is in another app.
     private func keepClickableWhenPinned() {
         guard pin.isPinned, isExpanded else { return }
         makeClickable()
@@ -638,10 +616,9 @@ final class SidePanel: NSPanel {
         takeKey()
     }
 
-    /// Points the bloom at 1 (open) or 0 (folded). A target that flips while
-    /// the card is still moving carries on from the size it reached: the open
-    /// and the fold are different curves, so the phase is re-read under the
-    /// one that takes over.
+    /// Points the bloom at 1 (open) or 0 (folded). If the target flips mid-flight,
+    /// the phase is re-read under the new curve so the card carries on from the
+    /// size it reached.
     private func setRevealTarget(_ target: CGFloat) {
         guard target != revealTarget else { return }
         if bloomPhase != revealTarget {
@@ -729,7 +706,7 @@ final class SidePanel: NSPanel {
             )
             hosting.appearance = NSAppearance(named: .darkAqua)
             hosting.wantsLayer = true
-            // `layoutContent` owns the frame; a flexible mask would let AppKit
+            // `layoutContent` sets the frame; a flexible mask would let AppKit
             // move the view on every window resize.
             hosting.autoresizingMask = []
             tabView.addSubview(hosting)
@@ -741,10 +718,9 @@ final class SidePanel: NSPanel {
         hosting.alphaValue = contentFade
     }
 
-    /// Grows or shrinks the card around the text box, keeping the header — and
-    /// the line being typed — where the eye left it. Eased on the display
-    /// link, so a new line or an opening result box stretches the card instead
-    /// of snapping it.
+    /// Grows or shrinks the card around the text box, keeping the header and the
+    /// line being typed in place. Eased on the display link, so a new line or an
+    /// opening result box stretches the card instead of snapping.
     private func applyBodyHeight(_ height: CGFloat, animated: Bool) {
         let clamped = min(
             max(height, SidePanelContentView.floatingMinBodyHeight),
@@ -766,13 +742,9 @@ final class SidePanel: NSPanel {
         startMotion()
     }
 
-    /// The panels keep the shelf widget's side margin and the island's
-    /// vertical clearance, so their boxes sit where the shelf's do.
-    ///
-    /// The content hangs off the card's top-right corner, not its top-left: the
-    /// window grows out of the screen edge, so the words stay where they will
-    /// rest while the card opens around them. A left-anchored view would slide
-    /// with the growing edge and read as the text moving, not the panel.
+    /// The panels keep the shelf's side margin and the island's vertical
+    /// clearance. The content hangs from the card's top-right corner, so the
+    /// words stay put while the window grows out of the screen edge.
     private func layoutContent() {
         guard let content else { return }
         let sideInset = SidePanelContentView.sideInset
@@ -1207,19 +1179,6 @@ final class SidePanel: NSPanel {
         return (next, nextVelocity)
     }
 
-    /// The frames an open plays, sampled at even steps. The fold has its own
-    /// curve and its own length, sampled by `foldSamples`.
-    static func revealSamples(frames: Int = 40) -> [CGFloat] {
-        let steps = max(frames, 2)
-        return (0...steps).map { bloomShape(CGFloat($0) / CGFloat(steps)) }
-    }
-
-    /// The frames a fold plays, from the card at full size to the tab.
-    static func foldSamples(frames: Int = 40) -> [CGFloat] {
-        let steps = max(frames, 2)
-        return (0...steps).map { foldShape(1 - CGFloat($0) / CGFloat(steps)) }
-    }
-
     /// One frame of an exponential approach, snapped once it cannot be seen.
     private func approach(
         _ value: CGFloat,
@@ -1242,14 +1201,9 @@ final class SidePanel: NSPanel {
         return t * t * (3 - 2 * t)
     }
 
-    private func lerp(_ from: CGFloat, _ to: CGFloat, _ t: CGFloat) -> CGFloat {
-        from + (to - from) * t
-    }
-
-    /// The window rect partway through an open. The face it draws is what
-    /// travels — the tab's box at 0, the card's at 1 — so both ends share a
-    /// middle. The grip strip grows below the face and never takes part in the
-    /// centring; lerping the window instead lifts the face by half the strip.
+    /// The window rect partway through an open. The face travels from the tab's
+    /// box to the card's, so both ends share a middle. The grip strip grows below
+    /// the face and never takes part in the centring.
     static func revealRect(
         from tab: NSRect,
         to card: NSRect,
@@ -1345,17 +1299,14 @@ final class SidePanel: NSPanel {
 
 }
 
-/// The card's surface layer, under the card's marks and over its black.
-///
-/// The layer is a material that covers the whole window, so it must never
-/// take a click: the grip and the card's own controls are above it, and the
-/// rest of the panel has to keep receiving the mouse.
+/// The card's glass layer, under the marks and over the black. It covers the
+/// whole window, so it never takes a click; the grip and controls above it do.
 @MainActor
 final class SidePanelGlassHost: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// The visible tab. It owns the mouse so the panel can move only up and down:
+/// The visible tab. It takes the mouse so the panel can move only up and down:
 /// the horizontal origin always comes from the docked screen.
 @MainActor
 final class SidePanelTabView: NSView {
@@ -1464,11 +1415,8 @@ final class SidePanelTabView: NSView {
         surfaceState.silhouette = silhouettePath()
     }
 
-    /// The card's outline with the handle's lobe under it, as one path.
-    ///
-    /// The card, the two fillets that run with the screen's edge and the lobe
-    /// under the card are one outline, so the card's surface covers all of it
-    /// in a single layer and no seam can show between the pieces.
+    /// The card's outline with the handle's lobe under it, as one path, so the
+    /// surface covers both in a single layer and no seam can show.
     func silhouettePath() -> Path {
         let path: Path
         if let panel, panel.showsCard {
@@ -1569,14 +1517,6 @@ final class SidePanelTabView: NSView {
         panel?.setHover(true)
     }
 
-    /// Whether the pointer sits on the tab right now. The tracking area cannot
-    /// answer this while the card covers the tab.
-    var pointerIsOnTab: Bool {
-        guard let window else { return false }
-        let point = convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
-        return restingRect.contains(point)
-    }
-
     /// Whether the pointer sits on the visible tab, not on the hit window the
     /// open card fills.
     var pointerIsOnVisibleTab: Bool {
@@ -1606,10 +1546,8 @@ final class SidePanelTabView: NSView {
 }
 
 /// The tab's own marks: the grip that moves the panel and the chevron that
-/// says where the click opens.
-///
-/// They live above the glass, because the surface is opaque under a black
-/// theme and would swallow anything drawn under it.
+/// opens it. They sit above the glass because an opaque black surface would
+/// swallow anything under it.
 @MainActor
 final class SidePanelTabInkView: NSView {
     weak var tab: SidePanelTabView?
@@ -1723,13 +1661,8 @@ struct SidePanelCardShape: Shape {
     }
 }
 
-
-/// The card's outline with the handle's lobe under it, as one path.
-///
-/// The card, the two fillets that run with the screen's edge and the lobe
-/// under the card are one outline. The card's surface covers all of it in a
-/// single layer, so no seam can show between the pieces and the colour is the
-/// app's theme rather than ours.
+/// The card's outline with the handle's lobe under it, as one path: the card,
+/// the screen-edge fillets and the lobe share one surface and one colour.
 struct SidePanelUnifiedShape: Shape {
     var reveal: CGFloat
     var stretch: CGFloat = 1
@@ -1751,11 +1684,8 @@ struct SidePanelUnifiedShape: Shape {
         return Path(card.cgPath.union(lobe.cgPath, using: .winding))
     }
 
-    /// The lobe's outline, hanging under the card's bottom edge.
-    ///
-    /// It is the collapsed tab's silhouette laid on its side. At rest it sits
-    /// inside the card, so the card's own outline is all that shows; the
-    /// pointer brings it out.
+    /// The lobe's outline under the card's bottom edge, the collapsed tab laid
+    /// on its side. At rest it sits inside the card; the pointer brings it out.
     static func lobe(in card: CGRect, amount: CGFloat) -> Path? {
         guard amount > 0.001 else { return nil }
         let flatBottom = card.maxY - SidePanelCardShape.filletRadius
@@ -1929,10 +1859,9 @@ struct Cubic {
     }
 }
 
-/// The collapsed tab, from the reference vector: it runs almost straight down
-/// the screen edge, turns in one tight corner, holds a straight face, then the
-/// same mirrored. The path is authored at 30 x 160 and scales to whatever rect
-/// it gets.
+/// The collapsed tab, from the reference vector: it runs down the screen edge,
+/// turns one tight corner, holds a straight face, then mirrors. The path is
+/// authored at 30 x 160 and scales to its rect.
 struct SidePanelTabShape: Shape {
     static let referenceWidth: CGFloat = 30
     static let referenceHeight: CGFloat = 160
@@ -1982,12 +1911,9 @@ struct SidePanelTabShape: Shape {
     }
 }
 
-/// The drag handle under the card: the collapsed tab's silhouette laid on its
-/// side, so the flat edge faces the card and the curve hangs below. The ends
-/// taper the way the tab's tips do, at the handle's own slim scale.
-///
-/// `stem` is a straight extension above the curve. The card buries it, so the
-/// curve starts exactly on the card's edge and reads as one piece with it.
+/// The drag handle: the collapsed tab's silhouette on its side, flat edge
+/// against the card, curve hanging below, ends tapered like the tab's tips.
+/// `stem` extends above the curve so the card buries the join.
 struct SidePanelGripShape: Shape {
     var stem: CGFloat = 0
 

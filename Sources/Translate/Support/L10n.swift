@@ -8,12 +8,6 @@ enum L10n {
         if language.hasPrefix("fr"), let value = fr[key] { return value }
         return en[key] ?? key
     }
-    /// Tests compare the tables; a missing key shows as a raw key in the UI.
-    static func strings(for language: String) -> [String: String] {
-        if language.hasPrefix("fr") { return fr }
-        if language.hasPrefix("th") { return th }
-        return en
-    }
 
     static func tr(_ key: String) -> String {
         if let o = override { return lookup(key, language: o) }

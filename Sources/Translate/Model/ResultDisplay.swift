@@ -15,9 +15,7 @@ enum ResultDisplay: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
-/// The page a card shows, and the only ones: input (paste or type, nothing
-/// translated), result (the translation alone), pair (original above the
-/// translation) and status (loading, error or notice).
+/// The page a card shows: input, result, pair or status.
 enum Page: String, CaseIterable, Identifiable, Sendable {
     /// Paste or type; no translation yet.
     case input

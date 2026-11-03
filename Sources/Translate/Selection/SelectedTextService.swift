@@ -8,9 +8,8 @@ enum SelectedTextService {
     private static let manualAccessibilityAttribute = "AXManualAccessibility" as CFString
     private static let enhancedUserInterfaceAttribute = "AXEnhancedUserInterface" as CFString
 
-    /// AX calls cross IPC and can stall for the whole messaging timeout, while
-    /// the droplet shares the host's process. Every walk therefore runs on a
-    /// wall-clock budget; a hung app is abandoned instead of freezing Droppy.
+    /// AX calls cross IPC and can stall for the host's whole messaging timeout.
+    /// Every walk runs on a wall-clock budget, so a hung app cannot freeze Droppy.
     private static let walkBudget: TimeInterval = 1.0
     private static let searchBudget: TimeInterval = 1.5
 
@@ -138,14 +137,8 @@ enum SelectedTextService {
         return SelectionCapture(text: text, element: element, range: range)
     }
 
-    static func readSelectedText(log: ((String) -> Void)? = nil) -> String? {
-        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
-        return readSelectedText(inApplicationPID: pid, log: log)
-    }
-
-    /// Chromium keeps its web accessibility tree dormant until a client asks
-    /// for it. Prefer AXManualAccessibility; AXEnhancedUserInterface can affect
-    /// window-move animation in the target app.
+    /// Chromium's accessibility tree is dormant until asked. Prefer
+    /// `AXManualAccessibility`; `AXEnhancedUserInterface` can disturb animations.
     static func enableWebContentAccessibility(
         inApplicationPID pid: pid_t,
         bundleIdentifier: String?,
@@ -200,10 +193,6 @@ enum SelectedTextService {
         }
     }
 
-    static func readSelectedText(inApplicationPID pid: pid_t, log: ((String) -> Void)? = nil) -> String? {
-        captureSelection(inApplicationPID: pid, log: log)?.text
-    }
-
     static func captureSelection(inApplicationPID pid: pid_t, log: ((String) -> Void)? = nil) -> SelectionCapture? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
@@ -226,57 +215,6 @@ enum SelectedTextService {
         let capture = captureSelection(inWindowOf: app, excluding: focusedElement, log: log)
         log?("Select: app pid=\(pid), window selection=\(capture.map { "chars=\($0.text.count)" } ?? "unavailable")")
         return capture
-    }
-
-    static func readSelectedText(
-        in systemWide: AXUIElement,
-        preferredPID: pid_t?,
-        log: ((String) -> Void)? = nil
-    ) -> String? {
-        var focusedApp: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(
-            systemWide, kAXFocusedApplicationAttribute as CFString, &focusedApp
-        ) == .success, let focusedApp,
-              CFGetTypeID(focusedApp) == AXUIElementGetTypeID() else {
-            log?("Select: focused app unavailable; frontmost pid=\(preferredPID.map(String.init) ?? "none")")
-            return nil
-        }
-
-        let appElement = focusedApp as! AXUIElement
-        var pid: pid_t = 0
-        _ = AXUIElementGetPid(appElement, &pid)
-        guard preferredPID == nil || preferredPID == pid else {
-            log?("Select: ignored stale AX focus pid=\(pid); frontmost pid=\(preferredPID ?? 0)")
-            return nil
-        }
-        var focusedUI: CFTypeRef?
-        let focusError = AXUIElementCopyAttributeValue(
-            appElement, kAXFocusedUIElementAttribute as CFString, &focusedUI
-        )
-        guard focusError == .success, let focusedUI,
-              CFGetTypeID(focusedUI) == AXUIElementGetTypeID() else {
-            log?("Select: focused pid=\(pid), element unavailable (AX \(focusError.rawValue))")
-            return nil
-        }
-
-        let focusedElement = focusedUI as! AXUIElement
-        logElementMetadata(focusedElement, pid: pid, log: log)
-        if let capture = captureSelection(from: focusedElement, application: appElement, log: log) {
-            log?("Select: focused pid=\(pid), selected-text=chars=\(capture.text.count)")
-            return capture.text
-        }
-        let text = readSelectedText(inWindowOf: appElement, log: log)
-        let result = text.map { "chars=\($0.count)" } ?? "unavailable"
-        log?("Select: focused pid=\(pid), window selection=\(result)")
-        return text
-    }
-
-    static func readSelectedText(
-        from element: AXUIElement,
-        application: AXUIElement? = nil,
-        log: ((String) -> Void)? = nil
-    ) -> String? {
-        captureSelection(from: element, application: application, log: log)?.text
     }
 
     static func captureSelection(
@@ -310,10 +248,6 @@ enum SelectedTextService {
             current = (parent as! AXUIElement)
         }
         return application.flatMap { captureSelection(inWindowOf: $0, log: log) }
-    }
-
-    private static func readSelectedText(inWindowOf app: AXUIElement, log: ((String) -> Void)? = nil) -> String? {
-        captureSelection(inWindowOf: app, log: log)?.text
     }
 
     private static func captureSelection(

@@ -45,13 +45,9 @@ extension SidePanelChipTarget {
     var isControl: Bool { !isBox }
 }
 
-/// The chip's shared state: the control under the pointer, whether it is held
-/// down, and where every control sits.
-///
-/// One mark slides over the whole panel to the control under the pointer. On
-/// macOS 26 it is a capsule of real Liquid Glass; before that it is a light in
-/// the control's own silhouette. Every control keeps its glass and its ink, so
-/// the mark never draws a second control over the first.
+/// The chip's shared state: the control under the pointer, whether it is held,
+/// and where every control sits. One mark slides between controls: Liquid Glass
+/// on macOS 26, a silhouette light before that.
 @MainActor
 final class SidePanelChipState: ObservableObject {
     /// The control under the pointer; nil hides the mark.

@@ -60,13 +60,8 @@ private struct PreviewLook {
     var notchHeight: CGFloat
 }
 
-/// The droplet's own surface, cut to the card's own outline.
-///
-/// The preview uses the same card the live floating panel and edge panel
-/// wear. The live card sits on the desktop; the picture sits on the settings
-/// page, so the droplet's black goes under it first: glass melts from black
-/// the way it does on the notch, instead of melting into the page and coming
-/// out grey.
+/// The droplet's own surface, cut to the card's outline, with black under
+/// the host's glass so it melts from black as it does on screen.
 private struct PreviewCardFace: View {
     let shape: AnyShape
 
@@ -253,8 +248,7 @@ private struct SidePanelSurfacePreview: View {
     }
 
     /// The card and its face, mirrored to the chosen edge. The content is not
-    /// part of the mirror: it is already laid out for either side, and flipping
-    /// it would shift it by its inset.
+    /// mirrored: it is already laid out for either side.
     private var card: some View {
         PreviewCardFace(
             shape: AnyShape(SidePanelUnifiedShape(reveal: 1, stretch: 1))
@@ -316,9 +310,8 @@ private struct ShelfWidgetSurfacePreview: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // The host's shelf chrome in the theme Droppy is set to, drawn by
-            // the same card as the panels: the theme is read, so the picture
-            // never wears the launcher's glass over this page's grey.
+            // The host's shelf chrome in Droppy's theme, read here so the
+            // picture never shows the launcher's glass over the page's grey.
             PreviewCardFace(shape: shell)
 
             SidePanelContentView(
