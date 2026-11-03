@@ -7,7 +7,7 @@ away again is not in it.
 
 ### The settings
 
-- The settings are pages: General, Display, Permissions and Guide.
+- The settings are pages: Translation, Display, Permissions and Guide.
   The droplet's own page opens them as doors, each with its tile, its name
   and a line about what is inside.
 - Every row is one of Droppy's own: the name on the left with a line of
@@ -31,7 +31,7 @@ away again is not in it.
   not there.
 - The language menus list only the models already downloaded for the pair, so
   a choice translates without a wait. Their last row, "Download languages…",
-  opens the General page, where another pair can be fetched.
+  opens the Translation page, where another pair can be fetched.
 - The source can stay on Auto, where the droplet detects the language, or be
   pinned to one.
 - The swap disc trades the pair; on the shelf the translation becomes the new
@@ -86,7 +86,7 @@ away again is not in it.
   back into the tab when another window takes the focus, unless the user
   pinned it. The handle comes out by growing that shape, so the face stays one
   continuous surface while it moves.
-- Copying the result is a row on the General page, beside the other things
+- Copying the result is a row on the Translation page, beside the other things
   the translation does, rather than a choice that only appears once a panel
   is chosen.
 - Every pop-up in the settings is a soft rectangle on a quiet glass with a
