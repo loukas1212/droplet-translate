@@ -20,10 +20,12 @@ jobs:
       - name: Download droppy SDK
         run: git clone https://gitlab.com/droppyformac1/droppykit.git
 
-      - name: Install DroppyKit SDK
+      - name: Install DroppyKit CLI
         run: |
           echo "$GITHUB_WORKSPACE/droppykit/Scripts" >> "$GITHUB_PATH"
-          droppykit version
+
+      - name: Verify DroppyKit installation
+        run: droppykit version
 
       - name: Build the droplet
         run: droppykit build
