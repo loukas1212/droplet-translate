@@ -987,6 +987,16 @@ enum PanelTileText {
     /// Air above and below the words. The top band is the fade's own height,
     /// so the first line is sharp while the box rests at its top.
     static let verticalAir: CGFloat = 16
+    /// The ink the boxes' words draw with: the appearance's own white or
+    /// black, one step off the pure end so the glass behind them does not
+    /// glare.
+    static var ink: NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor(white: 0.9, alpha: 1)
+                : NSColor(white: 0.1, alpha: 1)
+        }
+    }
     /// The soft band at each rim: the input's 10% at its resting height,
     /// capped so a tall result keeps the same 16pt rim.
     static func fadeBand(for height: CGFloat) -> CGFloat {
@@ -1064,9 +1074,11 @@ extension NSTextView {
     }
 }
 
-/// Keeps an open panel's glass bright while another app has the keyboard:
+/// Keeps a panel's glass bright while another app has the keyboard:
 /// `acquireKeyAppearance` clears macOS's frost for a non-key window without
-/// taking focus. Private selector, so older systems keep the inactive face.
+/// taking focus. The side panel holds it from the tab's first frame, so the
+/// tab and the open card wear the same glass. Private selector, so older
+/// systems keep the inactive face.
 @MainActor
 final class PanelKeyAppearance {
     private unowned let panel: NSWindow
@@ -1076,8 +1088,9 @@ final class PanelKeyAppearance {
         self.panel = panel
     }
 
-    /// The pin decides whether the card stays open, not how it looks: an open
-    /// card keeps its face. It is released only when the card folds or hides.
+    /// The pin decides whether the card stays open, not how it looks: a shown
+    /// panel keeps its face, tab and card alike. It is released only when the
+    /// panel hides.
     static func shouldHold(pinned: Bool, shown: Bool) -> Bool {
         shown
     }

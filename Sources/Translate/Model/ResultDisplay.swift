@@ -29,7 +29,7 @@ enum Page: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 
     /// The pages the setting can choose: input and status come from the state.
-    static let chosen: [Page] = [.result, .pair]
+    static let chosen: [Page] = [.pair, .result]
 
     /// The card shows the original above the translation only on the pair page.
     var showsOriginal: Bool { self == .pair }

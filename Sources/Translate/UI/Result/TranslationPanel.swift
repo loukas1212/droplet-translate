@@ -4,7 +4,7 @@ import QuartzCore
 import SwiftUI
 
 /// The droplet's result window, floating beside a capture.
-/// `SidePanelCardSurface` draws the app's themed card and
+/// `DroppyPanelSurface` draws the host's panel surface and
 /// `DroppyPanelActivation` takes focus for it.
 @MainActor
 final class TranslationPanel: NSPanel {
@@ -49,9 +49,15 @@ final class TranslationPanel: NSPanel {
     private var bloomPoint = CGPoint.zero
     private var bloomClosing = false
     private var lastBloomTick = CACurrentMediaTime()
-    /// The dot the card grows out of; a panel with no capture grows from the
-    /// pointer.
-    static let bloomDot: CGFloat = 36
+    /// The floating panel runs the shared spring on its own clock. The card is
+    /// at its size by about a third of it; the rest is the swell, a shallow
+    /// dip below the card and the return to it.
+    static let bloomDuration: CFTimeInterval = 0.8
+    static let foldDuration: CFTimeInterval = 0.4
+
+    /// The point the card pours out of. Zero: the sheet grows from nothing and
+    /// leaves no seed on its edge; the fold's last beat is then empty.
+    static let bloomDot: CGFloat = 0
     /// The tallest the card grows before its result scrolls.
     static let maximumHeight: CGFloat = 600
 
@@ -190,6 +196,12 @@ final class TranslationPanel: NSPanel {
         isVisible && wearsCard && !bloomClosing
     }
 
+    /// The bloom is a flourish, not information: Reduce Motion opens and closes
+    /// the card at once, as the edge panel does.
+    private var prefersReducedMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
     // MARK: - Entry points
 
     /// The actions the more menu offers. The droplet handles capture and
@@ -318,11 +330,12 @@ final class TranslationPanel: NSPanel {
         stopKeyRetry()
         // Fold back into the dot the card grew from. A fold that starts while
         // the card is still growing turns it round from where it is.
-        if animated, isVisible {
+        if animated, isVisible, !prefersReducedMotion {
             guard !bloomClosing else { return }
-            bloomCard = frame
-            bloomReveal = 1
-            bloomPhase = 1
+            // A card caught mid-open turns round from the size it reached. Its
+            // resting card is not the window's, which may be grown by the horn.
+            if bloomLink == nil { bloomCard = frame }
+            bloomPhase = SidePanel.phase(for: bloomReveal, folding: true)
             startBloom(closing: true)
             return
         }
@@ -444,7 +457,7 @@ final class TranslationPanel: NSPanel {
         )
         bloomCard = target
         guard bloomLink == nil else { return }
-        place(bloom: target)
+        place(card: target)
     }
 
     /// The window of `size` with the same top edge as `frame`. The card grows
@@ -536,10 +549,12 @@ final class TranslationPanel: NSPanel {
             ?? NSScreen.screens.first
         let opening = !isVisible || interruptedBloom
         // The panel stays where the user put it after the first presentation.
-        let windowFrame: NSRect
+        // A card caught mid-overshoot rests at the card's top, not the grown
+        // frame's.
+        var windowFrame: NSRect
         if isVisible {
             windowFrame = Self.frameKeepingTop(
-                frame,
+                interruptedBloom ? bloomCard : frame,
                 size: CGSize(width: width, height: panelHeight)
             )
         } else {
@@ -549,20 +564,22 @@ final class TranslationPanel: NSPanel {
                 on: target
             )
         }
+        windowFrame = Self.gridAligned(windowFrame, top: windowFrame.maxY)
         bloomCard = windowFrame
         if opening {
-            // The card blooms from the point it came from, growing on a radius
-            // with its contents and overshooting slightly. A result that arrives
-            // mid-flight starts again from the same point.
+            // The card keeps its resting frame; its mask pours the dot out
+            // into that frame. A result that arrives mid-flight starts again
+            // from the same point.
             if !interruptedBloom {
                 bloomPoint = Self.bloomPoint(near: rect, on: target)
             }
-            bloomReveal = 0
-            bloomPhase = 0
-            place(bloom: Self.bloomRect(card: windowFrame, around: bloomPoint, at: 0))
+            bloomReveal = prefersReducedMotion ? 1 : 0
+            bloomPhase = bloomReveal
         } else {
-            place(bloom: windowFrame)
+            bloomReveal = 1
+            bloomPhase = 1
         }
+        place(card: windowFrame)
 
         // The activation begins once per panel session; beginning it on every
         // status would hand the focus back and leave the panel inactive.
@@ -583,14 +600,15 @@ final class TranslationPanel: NSPanel {
         // until it sticks.
         startKeyRetry()
         if focusesEditor { takeEditorFocus() }
-        if opening { startBloom(closing: false) }
+        if opening, !prefersReducedMotion { startBloom(closing: false) }
         updateKeyAppearance()
     }
 
     // MARK: - Bloom
 
-    /// Where the card blooms from: the capture region's middle, or the pointer
-    /// without one. Host rects count from the top, windows from the bottom.
+    /// The side the card blooms from: the capture region's middle, or the
+    /// pointer without one. Host rects count from the top, windows from the
+    /// bottom; the dot sits on the card's top edge and takes its x from here.
     static func bloomPoint(near rect: CGRect?, on screen: NSScreen?) -> CGPoint {
         let target = screen ?? NSScreen.main ?? NSScreen.screens.first
         let screenFrame = target?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
@@ -601,46 +619,190 @@ final class TranslationPanel: NSPanel {
         )
     }
 
-    /// One frame of the open or fold. The card scales by one factor around the
-    /// bloom point, so it grows on a radius instead of stretching corner to
-    /// corner; past 1 it overshoots, below 0 it rests on the dot.
-    static func bloomRect(card: NSRect, around point: CGPoint, at reveal: CGFloat) -> NSRect {
-        let dot = bloomDot / card.height
-        let scale = max(dot, dot + (1 - dot) * reveal)
-        return NSRect(
-            x: point.x + (card.minX - point.x) * scale,
-            y: point.y + (card.minY - point.y) * scale,
-            width: card.width * scale,
-            height: card.height * scale
+    /// The card's shape while it blooms: the dot on the top edge, poured out
+    /// into the card's rounded rect. The corner away from the dot keeps a
+    /// larger radius longer, so the card arrives as a pour, not a bar.
+    static func bloomPath(in bounds: CGRect, dotX: CGFloat, reveal: CGFloat) -> CGPath {
+        let t = min(max(reveal, 0), 1)
+        let radius = bloomDot / 2
+        let limit = min(bounds.width, bounds.height) / 2
+        let nearLimit = min(panelRadius, limit)
+        let near = min(radius + (nearLimit - radius) * t, limit)
+        let far = min(near + (1 - t) * limit * 0.9, limit)
+        // Keep the dot inside the card's rounded top corners, so the mask
+        // never cuts it against the glass's own outline.
+        let inset = min(panelRadius, bounds.width / 2)
+        let x = min(max(dotX, inset), max(inset, bounds.width - inset))
+        let dot = CGRect(
+            x: x - radius,
+            y: bounds.maxY - bloomDot,
+            width: bloomDot,
+            height: bloomDot
+        )
+        // The fold runs past the dot, as the edge panel's tab does: the dot
+        // shrinks a little and settles back instead of holding still.
+        if reveal < 0 {
+            let size = bloomDot * (1 + reveal)
+            return CGPath(
+                ellipseIn: CGRect(
+                    x: dot.midX - size / 2,
+                    y: dot.midY - size / 2,
+                    width: size,
+                    height: size
+                ),
+                transform: nil
+            )
+        }
+        let rect = CGRect(
+            x: dot.minX + (bounds.minX - dot.minX) * t,
+            y: dot.minY + (bounds.minY - dot.minY) * t,
+            width: dot.width + (bounds.width - dot.width) * t,
+            height: dot.height + (bounds.height - dot.height) * t
+        )
+        // The dot sits on the top edge; the other end of the card trails.
+        let farOnRight = x < bounds.midX
+        return roundedPath(
+            in: rect,
+            topLeft: near,
+            topRight: near,
+            bottomRight: farOnRight ? far : near,
+            bottomLeft: farOnRight ? near : far
         )
     }
 
-    /// The words come in once the card is nearly out, and leave before it
-    /// starts to shrink, as on the edge panel.
+    /// A rounded rectangle with one radius per corner, in the card's own
+    /// bottom-left coordinates. The radii are clamped so the arcs never cross.
+    private static func roundedPath(
+        in rect: CGRect,
+        topLeft: CGFloat,
+        topRight: CGFloat,
+        bottomRight: CGFloat,
+        bottomLeft: CGFloat
+    ) -> CGPath {
+        let limit = min(rect.width, rect.height) / 2
+        let tl = min(topLeft, limit)
+        let tr = min(topRight, limit)
+        let br = min(bottomRight, limit)
+        let bl = min(bottomLeft, limit)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: rect.minX + tl, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.maxY))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
+            tangent2End: CGPoint(x: rect.maxX, y: rect.maxY - tr),
+            radius: tr
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + br))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+            tangent2End: CGPoint(x: rect.minX + br, y: rect.minY),
+            radius: br
+        )
+        path.addLine(to: CGPoint(x: rect.minX + bl, y: rect.minY))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+            tangent2End: CGPoint(x: rect.minX, y: rect.minY + bl),
+            radius: bl
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - tl))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+            tangent2End: CGPoint(x: rect.minX + tl, y: rect.maxY),
+            radius: tl
+        )
+        path.closeSubpath()
+        return path
+    }
+
+    /// The words come in once the card is nearly out, and leave as soon as it
+    /// starts to fold, on the edge panel's fade: the content never shows
+    /// through the moving edge, and the glass is what pours.
     static func bloomFade(_ reveal: CGFloat) -> CGFloat {
-        let t = min(max((reveal - 0.45) / 0.45, 0), 1)
+        let t = min(max((reveal - 0.88) / 0.12, 0), 1)
         return t * t * (3 - 2 * t)
     }
 
-    /// Puts one bloom frame on screen. The window takes the scaled card's rect,
-    /// and the content is laid out once at full size and scaled as a picture, so
-    /// words never reflow or clip while the card is small.
-    private func place(bloom rect: NSRect) {
-        setFrame(rect, display: true)
-        guard let card = cardView else { return }
-        let full = bloomCard.size
-        let scale = full.height > 0 ? rect.height / full.height : 1
-        card.frame = NSRect(
-            x: (rect.width - full.width) / 2,
-            y: (rect.height - full.height) / 2,
-            width: full.width,
-            height: full.height
+    /// The card grown around the dot by the shared curve's overshoot: the dot
+    /// is the centre, so every edge moves out along its own radius from the
+    /// start point and the card swells like a half circle below its top edge.
+    /// Below 1 it has not reached its size yet and the mask is still pouring.
+    static func overshootFrame(_ card: NSRect, dotX: CGFloat, at reveal: CGFloat) -> NSRect {
+        guard reveal > 1, card.width > 0, card.height > 0 else { return card }
+        // The dot keeps its place inside the card's rounded top corners, as in
+        // the mask.
+        let inset = min(panelRadius, card.width / 2)
+        let x = min(max(dotX, inset), max(inset, card.width - inset))
+        let y = card.height - bloomDot / 2
+        return NSRect(
+            x: card.minX + x * (1 - reveal),
+            y: card.minY + y * (1 - reveal),
+            width: card.width * reveal,
+            height: card.height * reveal
         )
+    }
+
+    /// The window frame with its top and height on whole points. The window
+    /// server rounds the origin and the height on its own; a fractional top
+    /// then lands on a different point from tick to tick, and the card's top
+    /// edge crawls while it blooms. Fixing both here leaves nothing to round.
+    static func gridAligned(_ rect: NSRect, top: CGFloat) -> NSRect {
+        let top = top.rounded()
+        let height = rect.height.rounded()
+        return NSRect(x: rect.minX, y: top - height, width: rect.width, height: height)
+    }
+
+    /// Puts the card on its resting frame. The mask carries the dot and the
+    /// pour; the horn of the bloom grows the card past its size around the dot
+    /// as one picture, so the words keep their layout and settle back with it.
+    private func place(card frame: NSRect) {
+        let cardRect = Self.overshootFrame(
+            frame,
+            dotX: bloomPoint.x - frame.minX,
+            at: bloomReveal
+        )
+        let window = Self.gridAligned(cardRect, top: frame.maxY)
+        // No display yet: the mask takes its frame from the new bounds below,
+        // and one draw pass carries the window, the scale and the shape.
+        setFrame(window, display: false)
+        guard let card = cardView else { return }
+        // The card follows the exact curve, while the window's top and height
+        // are whole points. Hanging the card from the window's top keeps its
+        // top edge still and lets the content scale on every tick, not in
+        // point steps. Its bounds stay at the resting size: AppKit resets a
+        // transform set on a view's own layer on the next geometry pass, while
+        // the frame-to-bounds scale is its own and stays.
+        card.frame = NSRect(
+            x: 0,
+            y: window.height - cardRect.height,
+            width: cardRect.width,
+            height: cardRect.height
+        )
+        card.bounds = NSRect(origin: .zero, size: frame.size)
+        card.alphaValue = 1
+        hosting?.alphaValue = Self.bloomFade(bloomReveal)
+        updateBloomMask()
+    }
+
+    /// The card's shape for the bloom, in its own layer so the glass and the
+    /// words clip together. At rest it is the card's own outline.
+    private func updateBloomMask() {
+        guard let card = cardView, card.bounds.width > 0, card.bounds.height > 0 else { return }
+        let mask: CAShapeLayer
+        if let current = card.layer?.mask as? CAShapeLayer {
+            mask = current
+        } else {
+            let layer = CAShapeLayer()
+            layer.fillColor = NSColor.white.cgColor
+            layer.fillRule = .nonZero
+            card.layer?.mask = layer
+            mask = layer
+        }
+        let dotX = bloomPoint.x - frame.minX
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        card.layer?.transform = CATransform3DMakeScale(scale, scale, 1)
+        mask.frame = card.bounds
+        mask.path = Self.bloomPath(in: card.bounds, dotX: dotX, reveal: bloomReveal)
         CATransaction.commit()
-        card.alphaValue = Self.bloomFade(bloomReveal)
     }
 
     private func startBloom(closing: Bool) {
@@ -664,7 +826,7 @@ final class TranslationPanel: NSPanel {
         // The open runs the shared curve forwards on its length, the fold runs
         // its own monotone curve on the shorter one.
         let target: CGFloat = bloomClosing ? 0 : 1
-        let duration = bloomClosing ? SidePanel.foldDuration : SidePanel.bloomDuration
+        let duration = bloomClosing ? Self.foldDuration : Self.bloomDuration
         let rate = CGFloat(dt) / CGFloat(duration)
         bloomPhase = bloomPhase < target
             ? min(target, bloomPhase + rate)
@@ -672,7 +834,9 @@ final class TranslationPanel: NSPanel {
         bloomReveal = bloomClosing
             ? SidePanel.foldShape(bloomPhase)
             : SidePanel.bloomShape(bloomPhase)
-        place(bloom: Self.bloomRect(card: bloomCard, around: bloomPoint, at: bloomReveal))
+        // The card follows the box and the horn on every tick; the mask
+        // carries the pour, the overshoot scales the card as one picture.
+        place(card: bloomCard)
         guard bloomPhase == target else { return }
         link.invalidate()
         bloomLink = nil
@@ -680,7 +844,7 @@ final class TranslationPanel: NSPanel {
     }
 
     /// 8pt below the region, above when it does not fit, clamped to the
-    /// screen. A nil rect falls back to the pointer.
+    /// screen. Without a region the card sits 8pt under the pointer.
     private static func frameForPanel(
         size: CGSize,
         near rect: CGRect?,
@@ -690,24 +854,21 @@ final class TranslationPanel: NSPanel {
         let visible = target?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let screenFrame = target?.frame ?? visible
 
-        let left: CGFloat
-        let rectTop: CGFloat
-        let rectBottom: CGFloat
+        var x: CGFloat
+        var y: CGFloat
         if let rect {
-            left = screenFrame.origin.x + rect.origin.x
-            rectTop = screenFrame.origin.y + screenFrame.height - rect.origin.y
-            rectBottom = rectTop - rect.height
+            let left = screenFrame.origin.x + rect.origin.x
+            let rectTop = screenFrame.origin.y + screenFrame.height - rect.origin.y
+            let rectBottom = rectTop - rect.height
+            x = left
+            y = rectBottom - 8 - size.height
+            if y < visible.minY + 8 {
+                y = rectTop + 8
+            }
         } else {
             let mouse = NSEvent.mouseLocation
-            left = mouse.x
-            rectTop = mouse.y + 1
-            rectBottom = mouse.y
-        }
-
-        var x = left
-        var y = rectBottom - 8 - size.height
-        if y < visible.minY + 8 {
-            y = rectTop + 8
+            x = mouse.x
+            y = mouse.y - 8 - size.height
         }
         x = min(max(x, visible.minX + 8), max(visible.minX + 8, visible.maxX - size.width - 8))
         y = min(max(y, visible.minY + 8), max(visible.minY + 8, visible.maxY - size.height - 8))
@@ -832,30 +993,25 @@ enum PanelBackdrop {
 /// The card's face behind a panel's content.
 private struct PanelSurfaceBackdrop: View {
     let backdrop: PanelBackdrop
-    let shape: AnyShape
 
     var body: some View {
         switch backdrop {
         case .hostGlass:
-            SidePanelCardSurface(shape: shape)
+            DroppyPanelSurface(cornerRadius: panelRadius)
         case .windowSurface:
             Color.clear
         }
     }
 }
 
-/// The card's glass, in its own AppKit layer under the content.
-/// `NSHostingView` keeps it out of the SwiftUI tree, as the edge panel does,
-/// so the card stays one layer under the boxes.
+/// The host's floating-panel surface, in its own AppKit layer under the
+/// content. `NSHostingView` keeps it out of the SwiftUI tree, as the edge
+/// panel does, so the card stays one layer under the boxes.
 private struct PanelSurfaceLayer: View {
     var body: some View {
-        SidePanelCardSurface(
-            shape: AnyShape(
-                RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-            )
-        )
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        DroppyPanelSurface(cornerRadius: panelRadius)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -909,12 +1065,7 @@ struct ResultWindowStatusView: View {
         .padding(16)
         .environment(\.colorScheme, colorScheme)
         .background {
-            PanelSurfaceBackdrop(
-                backdrop: backdrop,
-                shape: AnyShape(
-                    RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                )
-            )
+            PanelSurfaceBackdrop(backdrop: backdrop)
         }
         .clipShape(RoundedRectangle(cornerRadius: panelRadius, style: .continuous))
         .shadow(

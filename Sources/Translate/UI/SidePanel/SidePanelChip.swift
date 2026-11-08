@@ -88,19 +88,32 @@ final class SidePanelChipState: ObservableObject {
             : .spring(response: 0.33, dampingFraction: 0.75, blendDuration: 0)
     }
 
-    /// The faint light the mark lays over the control where there is no Liquid
-    /// Glass. A box takes a neutral wash instead: its words sit on the text
-    /// itself, and the accent would tint them.
-    func markFill(for target: SidePanelChipTarget?) -> Color {
-        guard target?.isControl == true else { return AdaptiveColors.overlayAuto(0.17) }
-        return AdaptiveColors.selectionBlueAuto.opacity(pressed ? 0.16 : 0.10)
+    /// The faint light the mark lays over a control where there is no Liquid
+    /// Glass. The boxes never take it: they are lit by their own words.
+    var markFill: Color {
+        AdaptiveColors.selectionBlueAuto.opacity(pressed ? 0.16 : 0.10)
     }
 
-    /// The light that spills past the control's rim where there is no Liquid
-    /// Glass. Boxes take none, since the glow would reach their words.
-    func markGlow(for target: SidePanelChipTarget?) -> Color {
-        guard target?.isControl == true else { return .clear }
-        return AdaptiveColors.selectionBlueAuto.opacity(pressed ? 0.55 : 0.40)
+    /// The light that spills past a control's rim where there is no Liquid
+    /// Glass. The boxes take none, since the glow would reach their words.
+    var markGlow: Color {
+        AdaptiveColors.selectionBlueAuto.opacity(pressed ? 0.55 : 0.40)
+    }
+
+    /// The wash a box holds while it has words. Dynamic Glass lights the input
+    /// from white and the result from black; Black keeps both white. Liquid
+    /// Glass follows the system's scheme, like the glass under it.
+    static func boxWash(_ box: SidePanelChipTarget, theme: HostTheme) -> Color {
+        switch theme {
+        case .dynamicGlass:
+            return (box == .result ? Color.black : Color.white).opacity(0.20)
+        case .black:
+            return Color.white.opacity(0.20)
+        case .liquidGlass:
+            let dark = NSApplication.shared.effectiveAppearance
+                .bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return (dark ? Color.white : Color.black).opacity(0.20)
+        }
     }
 
     /// The glowing ring's width and blur. The spill reaches about 3pt past the

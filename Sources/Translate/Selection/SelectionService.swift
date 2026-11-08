@@ -141,10 +141,12 @@ final class SelectionService {
                 return
             }
             if let usablePreselection {
-                // Normal keeps the shelf open so the widget receives the
-                // result; other destinations hide it as the slow path does.
+                // Normal's destination is the shelf, so leave it alone and let
+                // the result bring it back; other destinations hide it as the
+                // slow path does.
                 if model.resultDisplay == .normal {
                     self.consume(usablePreselection, model: model)
+                    model.revealAfterShelfHidden("translate")
                     return
                 }
                 let hidden = await model.withShelfHidden {

@@ -482,9 +482,9 @@ final class TranslateModel: ObservableObject {
         didSet { persist("autoCopy", autoCopyResult) }
     }
 
-    /// The page the user picks for a finished translation: the translation
-    /// alone, or the original above it.
-    @Published var resultPage: Page = .result {
+    /// The page the user picks for a finished translation: the original above
+    /// the translation unless they pick the translation alone.
+    @Published var resultPage: Page = .pair {
         // Saved under the old key so a choice made before the rename survives.
         didSet { persist("resultContent", resultPage.rawValue) }
     }
@@ -622,10 +622,9 @@ final class TranslateModel: ObservableObject {
         // Saved values from before the rename: "both" was the pair page.
         let storedPage = Self.stored(
             preferences, key: "resultContent", legacy: "popupContent",
-            default: Page.result.rawValue
+            default: Page.pair.rawValue
         )
-        resultPage = Page(rawValue: storedPage)
-            ?? (storedPage == "both" ? .pair : .result)
+        resultPage = Page(rawValue: storedPage) ?? .pair
         autoCopyResult = preferences.value(forKey: "autoCopy", default: false)
         translationProvider = TranslationProvider(
             rawValue: preferences.value(forKey: "provider", default: TranslationProvider.apple.rawValue)
@@ -1376,6 +1375,11 @@ final class TranslateModel: ObservableObject {
 
     func revealAfterShelfHidden(_ widgetID: ShelfWidgetID) {
         shelfWidgetToReveal = widgetID
+        // Normal mode's only destination is the shelf, so a capture or
+        // selection started while it was closed still has to bring it back.
+        if resultDisplay == .normal {
+            pendingResultReveal = widgetID
+        }
     }
 
     /// Holds the shelf open while the widget shows; reverts when the host

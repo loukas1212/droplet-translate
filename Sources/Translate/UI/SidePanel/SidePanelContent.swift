@@ -92,8 +92,10 @@ struct SidePanelContentView: View {
     /// What a full card leaves for the result: the 478pt card minus the
     /// inset, header, gaps and footer.
     static let shelfResultMax: CGFloat = 380
-    /// The 16pt a notch card spends on its corner inset. The descriptor
-    /// includes it, so the content adds it when it reports its rectangle.
+    /// The 16pt every declared shelf height includes. The host spends it on
+    /// the corner inset under a notch and hands a grouped row the height less
+    /// it; a solo island card keeps it as air. The descriptor includes it, so
+    /// the content adds it when it reports its rectangle.
     static let shelfContentInsetBudget: CGFloat = DroppySpacing.sm * 2
 
     /// The card a shelf input and result need. A zero result is the bare
@@ -143,9 +145,8 @@ struct SidePanelContentView: View {
     /// A control outside its hosting view takes no click, so the view covers the tab.
     static let pillStrip: CGFloat = gripStrip + 8
     /// The air the seam between the boxes keeps; the divider sits in its middle.
-    /// Odd, so the 3pt capsule splits it into whole points on a 1x display
-    /// instead of rounding to 3 above and 2 below.
-    private static let resultGap: CGFloat = 9
+    /// Odd, so the 3pt capsule splits it into whole points on a 1x display.
+    private static let resultGap: CGFloat = 11
     /// The footer holds the more disc plus the rim that separates it from the
     /// box above — the same 6pt as the header's.
     private static let footerHeight: CGFloat = PanelFooterMetrics.footerHeight
@@ -221,6 +222,11 @@ struct SidePanelContentView: View {
     /// The pointer is on the footer's more disc, or inside its open menu.
     @State private var pointerOnMore = false
     @State private var pointerInMenu = false
+    /// Bumped when macOS flips light or dark, so the boxes' wash re-reads the
+    /// system's scheme instead of keeping the one it was drawn with.
+    @State private var systemThemeTick = 0
+    /// The host's surface theme decides each box's wash.
+    @StateObject private var hostTheme = HostThemeStore()
     /// The menu follows the pointer; this covers the gap between the disc and
     /// the panel, so crossing it never closes the menu.
     @State private var moreCloseTask: Task<Void, Never>?
@@ -343,20 +349,17 @@ struct SidePanelContentView: View {
 
     private var pillHeight: CGFloat { LanguageMenu.pillRowHeight }
 
-    /// The card's vertical content inset: the island's 16pt shelf inset plus
-    /// the 1.5pt widget slot, rounded to a whole point.
+    /// The panel card's content inset on every edge: the host's 16pt shelf
+    /// inset, the 1.5pt widget slot and the 8pt air a solo shelf widget
+    /// keeps, rounded to a whole point.
     static var inset: CGFloat {
-        (DroppyShellMetrics.shelfContentInsets(usesNotchStyle: false).leading
-            + DroppyShellMetrics.shelfWidgetSlotInset).rounded()
-    }
-
-    /// The card's side margin: the host's shelf inset, the widget slot and the
-    /// air the solo shelf widget keeps around its boxes, so the panel's boxes
-    /// line up with the shelf's.
-    static var sideInset: CGFloat {
         (DroppyShellMetrics.shelfContentInsets(usesNotchStyle: false).leading
             + DroppyShellMetrics.shelfWidgetSlotInset + shelfBoxInset).rounded()
     }
+
+    /// The card's side margin. The same number as the vertical inset, so the
+    /// panel's boxes sit the same distance from every edge.
+    static var sideInset: CGFloat { inset }
 
     /// The card body holding the header, a `box`-point input and, when shown, the
     /// result and footer. The input tucks under the disc. `resultReveal` shrinks
@@ -529,6 +532,9 @@ struct SidePanelContentView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
+            // The boxes' wash sits under their words, not over them.
+            boxWash
+                .allowsHitTesting(false)
             VStack(spacing: 0) {
             header
                 .frame(height: pillHeight + Self.discRadius, alignment: .top)
@@ -567,11 +573,13 @@ struct SidePanelContentView: View {
                     scrollerCap: keepsGripInsideCard
                         ? (showsResult ? boxCap : closedInputHeight)
                         : boxCap,
-                    hoverChrome: true,
-                    // Folded, the tile's frame is the input's old height while
-                    // the result covers it; marking it would draw a wash over
-                    // the result at a box that is no longer there.
-                    chipTarget: faceFold == 0 && displayedBoxHeight > 0 ? .input : nil,
+                    hoverChrome: !model.input.isEmpty,
+                    // The frame feeds the box's resting wash, not the chip:
+                    // folded, it would draw a wash over the result at a box
+                    // that is no longer there, and an empty box has no words
+                    // to light.
+                    chipTarget: faceFold == 0 && displayedBoxHeight > 0 && !model.input.isEmpty
+                        ? .input : nil,
                     pocketCut: glassTiles ? Self.inputCut : nil
                 )
                 // On the result page the input is a shrinking top slice: the
@@ -787,6 +795,19 @@ struct SidePanelContentView: View {
             )
             reportShelfContentHeight()
         }
+        // The host pins its shell dark, so a system theme change never reaches
+        // the view's own appearance; the wash reads the system directly and
+        // needs a redraw when the system flips.
+        .onReceive(DistributedNotificationCenter.default().publisher(
+            for: Notification.Name("AppleInterfaceThemeChangedNotification")
+        )) { _ in
+            systemThemeTick &+= 1
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            systemThemeTick &+= 1
+        }
     }
 
     /// The floating panel fits its box to whatever it holds: the translation,
@@ -955,8 +976,8 @@ struct SidePanelContentView: View {
         return min(cap, max(input, fitted))
     }
 
-    /// The widget rectangle the shelf content needs. The host draws a card
-    /// 16pt taller on the notch for its corner inset; the island spends none.
+    /// The content the shelf needs, before the 16pt every mount budgets; the
+    /// widget adds that when it reports its rectangle.
     private var shelfDesiredContentHeight: CGFloat {
         let input = shelfDesiredInputHeight
         let result = shelfDesiredResultHeight
@@ -1055,12 +1076,16 @@ struct SidePanelContentView: View {
                     .allowsHitTesting(false)
             }
         }
+        // The wash is the box's own background, so it takes the box's size and
+        // can never push its neighbours.
+        .background {
+            if resultReveal >= 1, !model.output.isEmpty {
+                outline.fill(SidePanelChipState.boxWash(.result, theme: hostTheme.current))
+            }
+        }
         // The rim the glass draws is the rim the words live in: a rect clip
         // would let a line show past the rounded corner.
         .clipShape(outline)
-        // The mark covers what is on screen, not the whole box: a full-height
-        // frame would let the chip's glass hang past the card's edge.
-        .chipTarget(resultReveal >= 1 ? .result : nil)
         return box
     }
 
@@ -1100,26 +1125,26 @@ struct SidePanelContentView: View {
     /// The drag handle is the collapsed tab's body on its side: a 104-long
     /// curve of 18 points, with a straight stem above it that stays buried in
     /// the card.
-    static let gripWidth: CGFloat = 104
-    static let gripCurveDepth: CGFloat = 18
+    nonisolated static let gripWidth: CGFloat = 104
+    nonisolated static let gripCurveDepth: CGFloat = 18
     /// The stem is buried in the card when the handle shows, so its top never
     /// draws a line across the card's edge.
-    static let gripTuck: CGFloat = 3
+    nonisolated static let gripTuck: CGFloat = 3
     /// At rest the tab's deepest point clears the card's edge by this much, so
     /// no black sliver peeks out under the face.
-    static let gripHide: CGFloat = 2
+    nonisolated static let gripHide: CGFloat = 2
     /// The stem plus the curve the card shows.
-    static var gripDepth: CGFloat { gripCurveDepth + gripTuck }
+    nonisolated static var gripDepth: CGFloat { gripCurveDepth + gripTuck }
     /// The tab rests hidden behind the card's face, so its bottom edge sits
     /// above the card's edge and only the bar shows inside the card.
-    static var gripRise: CGFloat { gripCurveDepth + gripHide }
-    /// Air under the curve: the hosting view reaches below the card's edge, so
+    nonisolated static var gripRise: CGFloat { gripCurveDepth + gripHide }
+    /// The hosting view reaches below the card's edge by the curve's depth, so
     /// the curve hangs whole and only the stem stays buried.
     static var gripPadding: CGFloat { pillStrip - inset - gripCurveDepth }
     /// The curve starts this far above the card's edge, so the card's black
     /// covers the join. Two fills that meet on one line each cover half of the
     /// boundary pixel, and the background shows through the seam.
-    static let gripOverlap: CGFloat = 1
+    nonisolated static let gripOverlap: CGFloat = 1
     /// The bar is the whole resting affordance; the handle grows around it.
     static let gripRestBar = CGSize(width: 22, height: 3)
     static let gripOutBar = CGSize(width: 30, height: 4)
@@ -1301,9 +1326,11 @@ struct SidePanelContentView: View {
         frames: [SidePanelChipTarget: CGRect],
         marksHeader: Bool = true
     ) -> SidePanelChipTarget? {
-        let frames = marksHeader ? frames : frames.filter { !$0.key.isHeader }
-        return hit(point, frames: frames, slop: 0)
-            ?? hit(point, frames: frames, slop: 4)
+        // The boxes are lit by their content, so the pointer never marks one.
+        let frames = frames.filter { !$0.key.isBox }
+        let marked = marksHeader ? frames : frames.filter { !$0.key.isHeader }
+        return hit(point, frames: marked, slop: 0)
+            ?? hit(point, frames: marked, slop: 4)
     }
 
     /// Menu rows report their chip frame inset from the row, so the hit test
@@ -1362,7 +1389,7 @@ struct SidePanelContentView: View {
     /// the pointer, wherever it sits in the panel.
     private var chipLayer: some View {
         ZStack(alignment: .topLeading) {
-            boxWash
+            controlWash
             glassMark
             chipInk
         }
@@ -1381,41 +1408,37 @@ struct SidePanelContentView: View {
         AnyShape(RoundedRectangle(cornerRadius: boxRadius, style: .continuous))
     }
 
-    /// Whether the pointer is holding a marked control. A held box is not a
-    /// button, so it keeps its resting wash.
-    private var pressedMark: Bool {
-        chip.pressed && chip.target?.isBox == false
-    }
-
     /// The control the mark rests on, or the one it last marked.
     private var markedTarget: SidePanelChipTarget? {
         chip.target ?? chip.lastTarget
     }
 
-    /// The two boxes aren't buttons: their words sit on the text itself, so the
-    /// mark washes them neutrally and spills no light.
-    private var markedIsControl: Bool {
-        markedTarget?.isControl ?? false
-    }
-
     /// The wash a marked control takes: faint enough to leave the control's
     /// own glass and ink readable.
     private var washFill: Color {
-        chip.markFill(for: markedTarget)
+        chip.markFill
     }
 
     /// The light the mark spills just outside the control's rim.
     private var markGlow: Color {
-        chip.markGlow(for: markedTarget)
+        chip.markGlow
     }
 
-    /// The mark under the pointer, lit in its own silhouette. A box takes the
-    /// neutral wash the kit's glass carries. A button takes the same wash only
-    /// where there is no Liquid Glass; above that, `glassMark` is the mark.
+    /// The input box's resting wash, drawn behind its words: a box is lit by
+    /// its own content, not by the pointer. Its frame arrives only while it
+    /// holds text, and the wash stays for as long as it does.
     @ViewBuilder
     private var boxWash: some View {
-        if let rect = markedRect,
-           markedTarget?.isBox == true || !SidePanelChipState.hasLiquidGlass {
+        if let rect = chip.frames[.input] {
+            boxWashFill(AnyShape(SidePanelBoxChipShape(cut: Self.inputCut)), in: rect)
+        }
+    }
+
+    /// The mark under a control where there is no Liquid Glass; above that,
+    /// `glassMark` is the mark.
+    @ViewBuilder
+    private var controlWash: some View {
+        if !SidePanelChipState.hasLiquidGlass, let rect = markedRect {
             ZStack(alignment: .topLeading) {
                 washShape
                     .stroke(markGlow, lineWidth: SidePanelChipState.markGlowWidth)
@@ -1429,28 +1452,28 @@ struct SidePanelContentView: View {
             }
             .opacity(chip.target == nil ? 0 : 1)
             .animation(SidePanelChipState.slide(reduceMotion: reduceMotion), value: rect)
-            .animation(DroppyAnimation.hoverQuick, value: pressedMark)
-            .animation(DroppyAnimation.state, value: markedIsControl)
+            .animation(DroppyAnimation.hoverQuick, value: chip.pressed)
             .animation(DroppyAnimation.state, value: chip.target == nil)
         }
     }
 
-    /// The silhouette the wash takes: the input keeps its disc pocket, the
-    /// result is a plain box, and a menu row follows the menu's own corners.
+    /// One box's wash, cut to the box's own silhouette with a sharp rim: the
+    /// system's black or white over the glass. It follows the box while a new
+    /// line grows it, on the box's own clock.
+    private func boxWashFill(_ shape: AnyShape, in rect: CGRect) -> some View {
+        shape.fill(SidePanelChipState.boxWash(.input, theme: hostTheme.current))
+            .frame(width: rect.width, height: rect.height)
+            .offset(x: rect.minX, y: rect.minY)
+            .animation(DroppyAnimation.state, value: rect)
+    }
+
+    /// The silhouette a control's mark takes: a disc when its frame is
+    /// square, a capsule otherwise, menu rows included.
     private var washShape: AnyShape {
-        if let rect = markedRect, abs(rect.width - rect.height) < 0.5, markedIsControl {
+        if let rect = markedRect, abs(rect.width - rect.height) < 0.5 {
             return AnyShape(Circle())
         }
-        switch markedTarget {
-        case .input:
-            return AnyShape(SidePanelBoxChipShape(cut: Self.inputCut))
-        case .result:
-            return AnyShape(RoundedRectangle(cornerRadius: Self.boxRadius, style: .continuous))
-        case .menuCapture, .menuSelect, .menuPin, .menuSettings:
-            return AnyShape(Capsule(style: .continuous))
-        default:
-            return AnyShape(Capsule(style: .continuous))
-        }
+        return AnyShape(Capsule(style: .continuous))
     }
 
     /// The mark under the pointer: one capsule of Liquid Glass, on macOS 26.
@@ -1594,7 +1617,7 @@ struct SidePanelContentView: View {
         // More disc on the boxes' leading edge, engine picker on the trailing
         // one where menu rows cannot reach. Trash and the paste/copy pill sit
         // past the disc, so the action stays put when the boxes fold.
-        HStack(alignment: .center, spacing: DroppySpacing.sm) {
+        HStack(alignment: .bottom, spacing: DroppySpacing.sm) {
             ToolbarCapsule(
                 model: model,
                 requestCapture: requestCapture,
@@ -1770,7 +1793,7 @@ struct SidePanelContentView: View {
                 .onHover { gripHover = $0 }
                 .gesture(gripGesture)
         }
-        .onChange(of: out) { onGripOut($0) }
+        .onChange(of: out) { _, newValue in onGripOut(newValue) }
         .accessibilityElement()
         .accessibilityLabel(L10n.tr("a11y.grip"))
         .help(L10n.tr("a11y.grip"))

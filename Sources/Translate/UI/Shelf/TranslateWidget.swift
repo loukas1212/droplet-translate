@@ -11,11 +11,12 @@ struct TranslateWidget: View {
     var cancelSelection: () -> Void = {}
     /// The grouped shelf slot is 230pt wide; the language row shrinks with it.
     var rowWidth = SidePanelContentView.defaultRowWidth
-    /// What the host spends above and below the widget's rectangle: the notch
-    /// corner inset, or 0 on a solo island card. The descriptor includes it.
+    /// The 16pt every declared shelf height includes. The host spends it on
+    /// the corner inset under a notch and takes it off a grouped row; a solo
+    /// island card keeps it as air.
     var shelfHeightBudget: CGFloat = SidePanelContentView.shelfContentInsetBudget
     /// Asks the host for a card height. The content reports the rectangle it
-    /// needs; the widget adds the host's inset budget.
+    /// needs; the widget adds the 16pt budget.
     var onShelfHeight: (CGFloat) -> Void = { _ in }
     @State private var chip = SidePanelChipState()
 

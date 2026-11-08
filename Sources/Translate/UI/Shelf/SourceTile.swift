@@ -54,8 +54,8 @@ private struct ScrollableTextEditor: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
         textView.font = .systemFont(ofSize: fontSize)
-        textView.textColor = .labelColor
-        textView.insertionPointColor = .labelColor
+        textView.textColor = PanelTileText.ink
+        textView.insertionPointColor = PanelTileText.ink
 
         // The edge panel trims the top inset so a short box does not push its
         // line down. The 5pt leading indent lets the container track width.
@@ -72,7 +72,7 @@ private struct ScrollableTextEditor: NSViewRepresentable {
         textView.defaultParagraphStyle = paragraph
         textView.typingAttributes = [
             .font: NSFont.systemFont(ofSize: fontSize),
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: PanelTileText.ink,
             .paragraphStyle: paragraph
         ]
         textView.string = text

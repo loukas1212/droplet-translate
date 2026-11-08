@@ -125,8 +125,8 @@ extension TranslateDroplet: ShelfWidgetProviding {
                 layoutTraits: ShelfWidgetLayoutTraits(
                     preferredSoloWidth: SidePanelContentView.shelfSoloWidth,
                     preferredPairedWidth: 230,
-                    // The content's own height; the widget reports it as the
-                    // input and the fitted result grow.
+                    // The content plus the 16pt every mount budgets; the
+                    // widget reports it as the input and the result grow.
                     contentHeight: .fixed(shelfCardHeight)
                 ),
                 // The primary surface is a text field.
@@ -158,7 +158,9 @@ extension TranslateDroplet: ShelfWidgetProviding {
                 rowWidth: width > 0
                     ? min(SidePanelContentView.defaultRowWidth, width)
                     : SidePanelContentView.defaultRowWidth,
-                shelfHeightBudget: insets.top + insets.bottom,
+                // The declared height always includes the 16pt corner
+                // budget, even where the host spends none of it.
+                shelfHeightBudget: SidePanelContentView.shelfContentInsetBudget,
                 onShelfHeight: { [weak self] height in self?.setShelfHeight(height) }
             )
             .padding(edges)

@@ -248,7 +248,7 @@ struct TranslationOutputScrollView: NSViewRepresentable {
         paragraph.lineBreakMode = .byCharWrapping
         textView.defaultParagraphStyle = paragraph
         textView.font = .systemFont(ofSize: fontSize)
-        textView.textColor = NSColor(AdaptiveColors.notchSurfacePrimaryText)
+        textView.textColor = PanelTileText.ink
         textView.string = text
         textView.applyCardTextShadow()
         context.coordinator.lastText = text

@@ -39,12 +39,13 @@ away again is not in it.
 - Translate as You Type translates the text as it changes, and Copy Translation
   Automatically puts each finished result on the clipboard.
 - The side panel can sit on the left or the right edge of the screen. The side
-  panel and the floating panel show the original and the translation, or the
-  translation alone in a card only as tall as that result, with the target
-  language picker above the box and a close in its top corner. Both keep the
-  shelf widget's side margin, so the boxes sit at the same distance from the
-  card's edges wherever they appear. Drag the card to move it,
-  and drag the side panel's handle to pull the result out or fold it away.
+  panel and the floating panel show the original and the translation, which is
+  where a fresh install starts, or the translation alone in a card only as tall
+  as that result, with the target language picker above the box and a close in
+  its top corner. Both keep the shelf widget's side margin, so the boxes sit
+  the same distance from the card's sides wherever they appear. Drag the card
+  to move it, and drag the side panel's handle to pull the result out or fold
+  it away.
 - Keyboard shortcuts for translating the selection, reading a region and
   opening the droplet live in Droppy's own settings, and every one starts
   unbound so the user picks the key. The one that opens the droplet brings up
@@ -59,16 +60,18 @@ away again is not in it.
   chosen. A link under it opens the guide.
 - The Display page shows the chosen place with one example translation drawn
   by the droplet itself: the shelf widget in its host's shell, the edge
-  panel's own card on the chosen edge, or the floating panel on its own
-  surface. The picture follows every picker as it moves — the place, the
+  panel's own card on the chosen edge, or the floating panel on the host's
+  panel surface. The picture follows every picker as it moves — the place, the
   two boxes or the translation alone, and the side the panel docks to — and
   the Screen edge row sits under it, only while the side panel is chosen.
 - Every picture is drawn at one width, so the place never changes how large
   the example reads, and it is drawn the way the app draws that surface: the
-  host's own shelf surface, or the droplet's own card, over the black under
-  it, so a glass theme melts from black the way it does on the notch instead
-  of wearing the pale glass of the settings page. Each picture is one piece,
-  never two shapes in two colours.
+  host's own shelf surface, the droplet's own edge card, or the host's panel
+  surface for the floating panel, on a stage of the user's current desktop
+  picture that fills the settings column, so a glass theme melts from the
+  wallpaper it sits on. A wallpaper that is not a still image leaves the
+  black, so the glass still has something to melt from. Each picture is one
+  piece, never two shapes in two colours.
 - The Guide is four sections, not a numbered walkthrough: the three ways to
   start — typing on the shelf, capturing a region, reading a selection — what
   happens to the text once it is in, the keys it answers to, and the pin. Each
@@ -76,16 +79,20 @@ away again is not in it.
 - The side panel is one card: the card, the two corners that run with the
   screen's edge and the handle that hangs under it are a single shape. Its
   face is the theme Droppy is set to — solid black, clear Liquid Glass, or
-  black melting into that glass — drawn on the card's own outline with the
-  system glass, so the thin dark edge is the card's own and nothing sits
-  under it. The free edges catch a thin light at the top. The input and result
-  boxes have no surface of their own: their words sit straight on the face,
-  so the pane reads as one piece without a dark border. The face follows the
-  setting for the display the
-  panel is on, and a change reaches the card while it is open. The card folds
-  back into the tab when another window takes the focus, unless the user
-  pinned it. The handle comes out by growing that shape, so the face stays one
-  continuous surface while it moves.
+  black melting into that glass — with the system glass on the card's own
+  outline, so its rim runs along the free edge, the top, the bottom and the
+  handle, and a corner of glass past the screen edge that the card clips back,
+  so the rim never follows the two fillets. The free-edge corners
+  are continuous squircles, so the card eases out of its straight edges the
+  way Droppy's own rounded panels do; the screen-edge fillets are plain
+  quarter circles, so the melt meets the edge at a normal round. The free
+  edges catch a thin light at the top. The input and result boxes have no
+  surface of their own: their words sit straight on the face, so the pane
+  reads as one piece without a dark border. The face follows the setting for
+  the display the panel is on, and a change reaches the card while it is open.
+  The card folds back into the tab when another window takes the focus, unless
+  the user pinned it. The handle comes out by growing that shape, so the face
+  stays one continuous surface while it moves.
 - Copying the result is a row on the Translation page, beside the other things
   the translation does, rather than a choice that only appears once a panel
   is chosen.
@@ -127,24 +134,26 @@ away again is not in it.
   pill keeps the trash's place from the empty card to the result, so the row
   reads more, trash, paste or copy, then the engine.
 - The edge panel wears the app's theme, like the rest: its glass follows the
-  theme Droppy is set to — Black, Liquid Glass, or Dynamic Glass — so the card
-  changes with the notch and the shelf.
-- The floating panel is the edge panel's card in the panel's own rounded
-  outline: the same language row, the same boxes and the same footer, so a card
-  behaves identically wherever it is asked to appear. It opens empty from the
-  droplet's shortcut — set in Droppy's Shortcuts page, next to the two capture
-  shortcuts — when the Display page chooses it, and takes the keyboard in the
-  text field, or opens beside a capture with the result in it. The card ends
-  at its face, with no handle under it.
+  theme Droppy is set to — Black, Liquid Glass, or Dynamic Glass — with a
+  little black under the glass and a dark inner edge, so the card keeps its
+  words readable over a bright desktop. The tab wears the same bright glass
+  as the open card.
+- The floating panel sits on Droppy's own floating-panel surface, the one its
+  launcher uses, and holds the edge panel's language row, boxes and footer, so
+  a card behaves identically wherever it is asked to appear and follows the
+  app's theme. It opens empty from the droplet's shortcut — set in Droppy's
+  Shortcuts page, next to the two capture shortcuts — when the Display page
+  chooses it, and takes the keyboard in the text field, or opens beside a
+  capture with the result in it. The card ends at its face, with no handle
+  under it.
 - The result box beside the input is never shorter than the input: a short
   answer draws two boxes of one size, a longer one leaves the input at its own
   height and fits the words up to 400pt before they scroll.
-- The floating panel wears the same themed surface and the same footer as the
-  other surfaces: the more disc on the leading edge, the trash and the paste or
-  copy pill beside it, and the translate mark with its engine on the trailing
-  edge. The footer keeps the same 6pt rim above
-  the disc as the shelf and the edge panel, so the more menu sits as close to
-  the result box as it does on the other cards. Its more menu opens upward from
+- The floating panel wears the same footer as the other surfaces: the more disc
+  on the leading edge, the trash and the paste or copy pill beside it, and the
+  translate mark with its engine on the trailing edge. The footer keeps the
+  same 6pt rim above the disc as the shelf and the edge panel, so the more menu
+  sits as close to the result box as it does on the other cards. Its more menu opens upward from
   the disc in one column, on the same spring as the shelf and the edge panel,
   and its glass starts as the disc's circle and slides up into the menu's
   rounded rectangle, so the background comes out of the button before the rows
@@ -159,13 +168,13 @@ away again is not in it.
   the source again. Pin stays in the more menu, so the header keeps only the
   picker and the close disc; the panel keeps the clear glass while it is open,
   like the edge card.
-- The floating panel blooms out of the point the result came from: the card and
-  everything on it grow on a radius from a dot at the captured region, run a
-  little past their size and settle, and the words come in as the card is
-  nearly out. It closes by shrinking back into the same dot on a shorter curve
-  that never grows on the way in. The edge panel folds on that same curve, but
-  its tab runs a little past its own size and settles back, so the close ends
-  with one give instead of a stop.
+- The floating panel opens from the side the result came from: a dot on the
+  card's top edge pours out into the card's own shape, with the corner away
+  from the dot trailing, and the words come in as the card is nearly out. The
+  card then runs a little past its size, swelling around the dot, and settles
+  back. It closes by pouring the shape back into the dot on the fold's curve,
+  which never grows on the way in; the dot gives a little and settles before
+  the panel goes, as the edge panel's tab does.
 - The panel's controls wear the edge panel's sliding mark: on macOS 26 a
   capsule of Liquid Glass in the control's own frame, washed with the theme's
   highlight, travels to the control under the pointer, and the control's glyph
@@ -181,6 +190,11 @@ away again is not in it.
   the input box, the result box and the footer with the tools and the engine.
   The boxes are the edge panel's frosted panes, so they stay visible on the
   card instead of reading as text on black.
+- A box with words stays washed behind its words: the input and the result
+  keep a faint black on a light system and a faint white on a dark one, with
+  a sharp rim and a faint frost over the glass, for as long as they hold
+  text, instead of following the pointer. Their words are a soft white, one
+  step off the pure end, so the glass does not glare.
 - The shelf opens with the input alone, as the edge panel does; its card is as
   tall as the input needs, and grows to the fitted result when one arrives.
   The input spans 110–150pt. The result beside it is never shorter than the
@@ -190,6 +204,8 @@ away again is not in it.
   card never passes 480pt. The language row stays above the boxes; the full
   result face folds it away and puts the target picker in the result's top
   corner, at the copy pill's size.
+- The footer stays whole on the shelf's card: solo, on the island, and in a
+  row beside another widget.
 - Translation only in the settings folds the input away once a translation
   arrives; Original & Translation keeps it above the result.
 - A capture or a selection opens the shelf on the step its content needs:

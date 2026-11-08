@@ -25,12 +25,32 @@ final class SidePanelPinState: ObservableObject {
 }
 
 /// The card's face in Droppy's theme: black, Liquid Glass, or Dynamic Glass
-/// (black melting into glass). The glass uses the card's own outline, so its
-/// rim is the card's edge.
+/// (black melting into glass). The glass keeps the card body's rim on the
+/// free edge, top and bottom, and flares past the screen edge so the host's
+/// rim never follows the two fillets; a little black under it and a dark inner
+/// edge keep the card readable over a bright desktop.
 struct SidePanelCardSurface: View {
     let shape: AnyShape
     var mirrored = false
+    /// Black under the glass; 0 leaves the host's glass as clear as it is.
+    var shade: Double = 0
+    /// The dark inner edge under the light hairline; 0 leaves the rim light.
+    var edgeOpacity: Double = 0
+    /// The card body's glass keeps its rim; the shelf shell only needs the
+    /// glass to reach every edge, so its rim may stay outside.
+    var keepsBodyRim = false
     @StateObject private var theme = HostThemeStore()
+
+    /// The side panel's own body: dark enough for the card's white text over a
+    /// bright desktop, still clear enough to read as the host's glass. The
+    /// host's glass alone is nearly transparent, so a white window behind the
+    /// card turns the words white-on-white.
+    static let panelShade: Double = 0.3
+    static let panelEdgeOpacity: Double = 0.35
+    /// How far the glass runs past the screen edge: one card corner, so the
+    /// host's rim stays outside the window and never lands on the fillets.
+    /// The body's own edge keeps its rim.
+    static let glassOverhang: CGFloat = SidePanelCardShape.radius
 
     var body: some View {
         switch theme.current {
@@ -49,12 +69,57 @@ struct SidePanelCardSurface: View {
 
     @ViewBuilder
     private var glass: some View {
-        if #available(macOS 26.0, *) {
-            shape
-                .fill(.clear)
-                .glassEffect(.clear, in: shape)
-        } else {
-            shape.fill(.ultraThinMaterial)
+        ZStack {
+            if shade > 0 {
+                shape.fill(.black.opacity(shade))
+            }
+            if #available(macOS 26.0, *) {
+                GeometryReader { geo in
+                    let overhang = Self.glassOverhang
+                    if keepsBodyRim {
+                        let f = SidePanelCardShape.filletExtent
+                        let shift = CGSize(width: mirrored ? overhang : 0, height: overhang)
+                        let flare = CGRect(
+                            x: mirrored ? 0 : geo.size.width - f,
+                            y: 0,
+                            width: f + overhang,
+                            height: geo.size.height + overhang * 2
+                        )
+                        Color.clear
+                            .frame(
+                                width: geo.size.width + overhang,
+                                height: geo.size.height + overhang * 2
+                            )
+                            .glassEffect(
+                                .clear,
+                                in: SidePanelGlassShape(
+                                    silhouette: shape,
+                                    surfaceSize: geo.size,
+                                    shift: shift,
+                                    flare: flare
+                                )
+                            )
+                            .offset(x: mirrored ? -overhang : 0, y: -overhang)
+                    } else {
+                        Color.clear
+                            .frame(
+                                width: geo.size.width + overhang * 2,
+                                height: geo.size.height + overhang * 2
+                            )
+                            .glassEffect(
+                                .clear,
+                                in: RoundedRectangle(
+                                    cornerRadius: overhang,
+                                    style: .continuous
+                                )
+                            )
+                            .offset(x: -overhang, y: -overhang)
+                    }
+                }
+                .clipShape(shape)
+            } else {
+                shape.fill(.ultraThinMaterial)
+            }
         }
     }
 
@@ -80,8 +145,14 @@ struct SidePanelCardSurface: View {
             // The fade belongs to the screen edge, so it scales with the
             // surface: a fixed 40pt fade would swallow the whole rim of the tab.
             let fade = min(40, geo.size.width * 0.2)
-            shape
-                .stroke(
+            // The rim thins with the surface too: 2pt on the open card reads
+            // heavy on the tab, which is only 18pt wide.
+            let rimScale = min(1, max(0.5, geo.size.width / 200))
+            ZStack {
+                if edgeOpacity > 0 {
+                    shape.stroke(.black.opacity(edgeOpacity), lineWidth: 2 * rimScale)
+                }
+                shape.stroke(
                     LinearGradient(
                         stops: [
                             .init(color: .white.opacity(0.55), location: 0),
@@ -91,30 +162,31 @@ struct SidePanelCardSurface: View {
                         startPoint: .top,
                         endPoint: .bottom
                     ),
-                    lineWidth: 1
+                    lineWidth: rimScale
                 )
-                .mask { shape.fill(.white) }
-                .mask {
-                    HStack(spacing: 0) {
-                        if mirrored {
-                            LinearGradient(
-                                colors: [.clear, .white],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: fade)
-                            Color.white
-                        } else {
-                            Color.white
-                            LinearGradient(
-                                colors: [.white, .clear],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                            .frame(width: fade)
-                        }
+            }
+            .mask { shape.fill(.white) }
+            .mask {
+                HStack(spacing: 0) {
+                    if mirrored {
+                        LinearGradient(
+                            colors: [.clear, .white],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: fade)
+                        Color.white
+                    } else {
+                        Color.white
+                        LinearGradient(
+                            colors: [.white, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: fade)
                     }
                 }
+            }
         }
     }
 }
@@ -124,8 +196,14 @@ struct SidePanelSurfaceLayer: View {
     @ObservedObject var state: SidePanelSurfaceState
 
     var body: some View {
-        SidePanelCardSurface(shape: AnyShape(state.silhouette), mirrored: state.mirrored)
-            .allowsHitTesting(false)
+        SidePanelCardSurface(
+            shape: AnyShape(state.silhouette),
+            mirrored: state.mirrored,
+            shade: SidePanelCardSurface.panelShade,
+            edgeOpacity: SidePanelCardSurface.panelEdgeOpacity,
+            keepsBodyRim: true
+        )
+        .allowsHitTesting(false)
     }
 }
 
@@ -164,10 +242,10 @@ final class SidePanel: NSPanel {
         )
     }
 
-    /// The card body plus the two flare radii that melt its top and bottom
+    /// The card body plus the two fillets that melt its top and bottom
     /// corners into the screen edge.
     static func cardHeight(forBody body: CGFloat) -> CGFloat {
-        body + SidePanelCardShape.filletRadius * 2
+        body + SidePanelCardShape.filletExtent * 2
     }
 
     /// The window that holds a card body of `body`: the card plus the
@@ -227,33 +305,48 @@ final class SidePanel: NSPanel {
 
     // MARK: - Opening and folding
 
-    /// The bloom's length and shape, shared by both surfaces. It leaves the
-    /// point at once, runs a twentieth past the card and settles.
-    static let bloomDuration: CFTimeInterval = 0.5
+    /// The edge panel's bloom length. Both surfaces run the shared spring on
+    /// this clock: the card swells past its size, dips a little under it and
+    /// settles.
+    static let bloomDuration: CFTimeInterval = 0.8
 
-    /// The fold's two beats: the card shrinks past the tab, then settles back to
-    /// it. Both panels read the total.
-    static let foldShrinkDuration: CFTimeInterval = 0.3
-    static let foldSettleDuration: CFTimeInterval = 0.2
-    static var foldDuration: CFTimeInterval { foldShrinkDuration + foldSettleDuration }
+    /// The edge panel's close clock, the same 0.4s cut the floating panel folds
+    /// on: the card meets the tab at about 0.2s, dips 6.8% under it at 0.24s
+    /// and settles by 0.4s.
+    static let foldDuration: CFTimeInterval = 0.4
 
+    /// The shared open, in phase: a lightly damped spring. The card starts
+    /// from rest, swells about 7% past itself, dips about half a percent under
+    /// it and comes back. The beats were tuned on a 0.8s clock: the swell at
+    /// 0.30s, the dip at 0.61s; a surface plays the same phases on its own.
     static func bloomShape(_ phase: CGFloat) -> CGFloat {
-        let t = min(max(phase, 0), 1)
-        // Ease-out back: fast out of the point, a twentieth past the card, a
-        // still end. The back amount is what sets that peak: 1.1655 → 1.05.
-        let back: CGFloat = 1.1655
-        let u = t - 1
-        let value = 1 + (back + 1) * u * u * u + back * u * u
-        // The ends are exact, without the back constant's rounding residue:
-        // the folded card is 0 and the open one is 1.
-        guard t > 0 else { return 0 }
-        return t < 1 ? value : 1
+        let damping: CGFloat = 0.65
+        // The period that puts the swell at about a third of the open.
+        let period: CGFloat = 0.46
+        let tunedDuration: CGFloat = 0.8
+        let frequency = 2 * CGFloat.pi / period
+        let damped = frequency * sqrt(1 - damping * damping)
+        let ratio = damping / sqrt(1 - damping * damping)
+        func value(at time: CGFloat) -> CGFloat {
+            let decay = exp(-damping * frequency * time)
+            return 1 - decay * (cos(damped * time) + ratio * sin(damped * time))
+        }
+        guard phase > 0 else { return 0 }
+        guard phase < 1 else { return 1 }
+        return value(at: phase * tunedDuration)
     }
 
     /// The card's share of its size partway through a fold, from the card at 1
-    /// to the tab at 0. It never runs above the card: a close that puffed back
-    /// out first would read as a hesitation, not a dismissal.
+    /// to the tab at 0, with the floating panel's dip. It never runs above the
+    /// card: a close that puffed back out first would read as a hesitation, not
+    /// a dismissal.
     static func foldShape(_ phase: CGFloat) -> CGFloat {
+        foldShape(phase, squash: foldSquash)
+    }
+
+    /// The same two beats with `squash` as how far the fold runs past the tab
+    /// at the turn. The edge panel's close dips a little deeper.
+    static func foldShape(_ phase: CGFloat, squash: CGFloat) -> CGFloat {
         let t = min(max(phase, 0), 1)
         // Two beats: the card shrinks past the tab, smaller than it, then eases
         // back up to it. The card leaves at a finite speed and brakes into the
@@ -262,7 +355,7 @@ final class SidePanel: NSPanel {
             let span = 1 - foldTurn
             let u = (t - foldTurn) / span
             return hermite(
-                from: -foldSquash,
+                from: -squash,
                 to: 1,
                 startSlope: 0,
                 endSlope: foldStartSlope * span,
@@ -270,7 +363,7 @@ final class SidePanel: NSPanel {
             )
         }
         let v = t / foldTurn
-        return hermite(from: 0, to: -foldSquash, startSlope: 0, endSlope: 0, at: v)
+        return hermite(from: 0, to: -squash, startSlope: 0, endSlope: 0, at: v)
     }
 
     /// One cubic Hermite from `start` to `end`; the slopes are per unit of `t`.
@@ -289,19 +382,30 @@ final class SidePanel: NSPanel {
             + (t3 - t2) * endSlope
     }
 
-    /// The fold's constants: how far the tab shrinks past its own size, the
-    /// card's exit speed, and the turn between the two beats. The fold runs the
-    /// curve backwards, so the settle comes first and the shrink after.
-    static let foldSquash: CGFloat = 0.12
-    static let foldStartSlope: CGFloat = 2.2
-    static var foldTurn: CGFloat { CGFloat(foldSettleDuration / foldDuration) }
+    /// How far the floating panel's fold runs past its own size at the turn:
+    /// the open's 6.8% swell, mirrored.
+    static let foldSquash: CGFloat = 0.068
+    /// How far the edge panel's close dips under the tab before it settles: a
+    /// little deeper than the open's swell, so the landing reads at tab size.
+    static let edgeFoldSquash: CGFloat = 0.12
+    /// The fold's exit speed and the turn between its two beats. The fold runs
+    /// the curve backwards, so the settle comes first and the shrink after.
+    private static let foldStartSlope: CGFloat = 1.7
+    private static let foldTurn: CGFloat = 0.4
 
-    /// The phase whose reveal is `value` under `shape`, so a fold interrupted
-    /// by an open (or an open by a fold) carries on from the size it reached
-    /// instead of jumping to the other curve's idea of that moment.
+    /// The phase whose reveal is `value` under the open or the floating's fold,
+    /// so a fold interrupted by an open (or an open by a fold) carries on from
+    /// the size it reached instead of jumping to the other curve's idea of that
+    /// moment.
     static func phase(for reveal: CGFloat, folding: Bool) -> CGFloat {
+        phase(for: reveal, folding: folding, squash: foldSquash)
+    }
+
+    /// The phase under a fold with its own dip depth, used by the edge panel's
+    /// close so it inverts the curve it actually runs.
+    static func phase(for reveal: CGFloat, folding: Bool, squash: CGFloat) -> CGFloat {
         let clamped = min(max(reveal, 0), 1)
-        let size = min(max(reveal, -foldSquash), 1)
+        let size = min(max(reveal, -squash), 1)
         if folding {
             // The fold runs past the tab and comes back, so the size picks its
             // own beat: the shrink above zero, the settle below it.
@@ -310,13 +414,14 @@ final class SidePanel: NSPanel {
             for _ in 0..<20 {
                 let mid = (low + high) / 2
                 let reaches = size < 0
-                    ? foldShape(mid) > size
-                    : foldShape(mid) < size
+                    ? foldShape(mid, squash: squash) > size
+                    : foldShape(mid, squash: squash) < size
                 if reaches { low = mid } else { high = mid }
             }
             return (low + high) / 2
         }
-        // bloomShape climbs from 0 to 1 over the first half of the open.
+        // bloomShape crosses 1 in the first third of the open; 0.5 is a safe
+        // upper bound for the search.
         var low: CGFloat = 0
         var high: CGFloat = 0.5
         for _ in 0..<20 {
@@ -325,6 +430,7 @@ final class SidePanel: NSPanel {
         }
         return (low + high) / 2
     }
+
     /// The tab's own growth: a 150ms ease-out that answers the pointer, not a
     /// click. The grip leaves first, then the icon arrives.
     private static let hoverDuration: CFTimeInterval = 0.15
@@ -338,8 +444,8 @@ final class SidePanel: NSPanel {
 
     /// 0 is the tab, 1 the open card.
     private var reveal: CGFloat = 0
-    /// Where the bloom is on its curve, 0 folded and 1 open. The curve is
-    /// shared by the open and the fold, so the two beats take the same time.
+    /// Where the bloom is on its curve, 0 folded and 1 open. The open and the
+    /// fold share the phase, each on its own clock.
     private var bloomPhase: CGFloat = 0
     private var revealTarget: CGFloat = 0
     /// 0 is the resting tab, 1 the grown one.
@@ -371,11 +477,14 @@ final class SidePanel: NSPanel {
     var tabHeight: CGFloat {
         Self.height + (Self.hoverHeight - Self.height) * hoverAmount
     }
-    /// The card's face height in the tab view's coordinates. When open it comes
+    /// The card's face height in the tab view's coordinates. At rest it comes
     /// from the content's body, not the window: AppKit rounds window frames to
     /// whole points, which would leave the grip a pixel off the card edge.
+    /// While the open's overshoot grows the window, the card fills the window's
+    /// face instead, so it swells around its middle and the bottom edge travels
+    /// with it rather than riding the window's top.
     var faceHeight: CGFloat {
-        let windowHeight = reveal >= 1
+        let windowHeight = reveal == 1
             ? Self.windowHeight(forBody: bodyHeight)
             : tabView.bounds.height
         return max(windowHeight - visibleGripStrip, 1)
@@ -540,6 +649,9 @@ final class SidePanel: NSPanel {
         place()
         orderFrontRegardless()
         makeClickable()
+        // The tab wears the same bright glass as the open card, not the
+        // system's frosted inactive face.
+        updateKeyAppearance()
     }
 
     /// Gives the window back its clicks. Droppy leaves a droplet's window with
@@ -573,6 +685,7 @@ final class SidePanel: NSPanel {
         hoverAmount = 0
         hoverStart = nil
         isActive = false
+        updateKeyAppearance()
         tabView.needsDisplay = true
         orderOut(nil)
     }
@@ -622,7 +735,9 @@ final class SidePanel: NSPanel {
     private func setRevealTarget(_ target: CGFloat) {
         guard target != revealTarget else { return }
         if bloomPhase != revealTarget {
-            bloomPhase = Self.phase(for: reveal, folding: target == 0)
+            bloomPhase = target == 0
+                ? Self.phase(for: reveal, folding: true, squash: Self.edgeFoldSquash)
+                : Self.phase(for: reveal, folding: false)
         }
         revealTarget = target
     }
@@ -742,25 +857,28 @@ final class SidePanel: NSPanel {
         startMotion()
     }
 
-    /// The panels keep the shelf's side margin and the island's vertical
-    /// clearance. The content hangs from the card's top-right corner, so the
-    /// words stay put while the window grows out of the screen edge.
+    /// The panels keep the same 26pt margin on every edge. The content is laid
+    /// out at its open size around the card's middle, so the words grow out of
+    /// the tab with the card instead of hanging off its moving top edge.
     private func layoutContent() {
         guard let content else { return }
         let sideInset = SidePanelContentView.sideInset
         let width = Self.expandedWidth - sideInset * 2
+        let finalFaceHeight = Self.windowHeight(forBody: bodyHeight) - SidePanelContentView.gripStrip
         // The content hangs from the screen edge, so it stays put while the
-        // card grows over it; the free edge is the one that travels.
+        // card grows over it; the free edge is the one that travels. Its top
+        // follows the card's middle, so the footer is not left below the
+        // growing face and clipped until the card is nearly out.
         content.frame = NSRect(
             x: side == .right ? tabView.bounds.width - sideInset - width : sideInset,
-            y: SidePanelCardShape.filletRadius + SidePanelContentView.inset,
+            y: SidePanelCardShape.filletExtent + SidePanelContentView.inset
+                + (faceHeight - finalFaceHeight) / 2,
             width: width,
             height: SidePanelContentView.contentHeight(forBody: bodyHeight)
         )
 
         let leadingInset = (Self.windowWidth - Self.hoverWidth) * (1 - cardReveal)
         let faceWidth = max(tabView.bounds.width - leadingInset, 1)
-        let finalFaceHeight = Self.windowHeight(forBody: bodyHeight) - SidePanelContentView.gripStrip
         // The contents take the card's exact X/Y stretch, including its recoil.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -877,13 +995,15 @@ final class SidePanel: NSPanel {
         updateKeyAppearance()
     }
 
-    /// The card keeps one face while it is open: unpinning must not hand it
-    /// back to the system's frosted inactive glass under the pointer.
+    /// The tab and the card keep one face: the panel is shown from `show` to
+    /// `hide`, so the glass stays bright even while another app has the
+    /// keyboard. Unpinning must not hand it back to the system's frosted
+    /// inactive glass under the pointer.
     private func updateKeyAppearance() {
         keyAppearance.hold(
             PanelKeyAppearance.shouldHold(
                 pinned: pin.isPinned,
-                shown: isExpanded
+                shown: isActive
             )
         )
     }
@@ -1055,7 +1175,9 @@ final class SidePanel: NSPanel {
         bloomPhase = bloomPhase < revealTarget
             ? min(revealTarget, bloomPhase + rate)
             : max(revealTarget, bloomPhase - rate)
-        reveal = folding ? Self.foldShape(bloomPhase) : Self.bloomShape(bloomPhase)
+        reveal = folding
+            ? Self.foldShape(bloomPhase, squash: Self.edgeFoldSquash)
+            : Self.bloomShape(bloomPhase)
         if let start = hoverStart {
             let t = min(max((now - start) / Self.hoverDuration, 0), 1)
             let eased = 1 - pow(1 - t, 3)
@@ -1190,10 +1312,19 @@ final class SidePanel: NSPanel {
         return abs(target - next) < 0.002 ? target : next
     }
 
-    /// One reveal-driven fade in both directions: reversing mid-flight cannot
-    /// jump between separate opening and folding opacity curves.
+    /// The words come in on the open's clock, after the card is out: a fade
+    /// squeezed into the last reveal points is only a couple of frames and
+    /// reads as a cut. The fold still clears them on the reveal, so they are
+    /// gone before the card starts to shrink; the minimum keeps an interrupted
+    /// open or fold from flashing them back.
     private var contentFade: CGFloat {
-        smoothstep(from: 0.45, to: 0.9)
+        min(openContentFade, smoothstep(from: 0.8, to: 0.98))
+    }
+
+    /// The open's own fade: a fifth of the clock, starting as the card lands.
+    private var openContentFade: CGFloat {
+        let t = min(max((bloomPhase - 0.28) / 0.2, 0), 1)
+        return t * t * (3 - 2 * t)
     }
 
     private func smoothstep(from: CGFloat, to: CGFloat) -> CGFloat {
@@ -1452,13 +1583,17 @@ final class SidePanelTabView: NSView {
         )
     }
 
-    /// The tab from its resting size to its grown one, flush with the screen
-    /// edge and centred on the tab's own middle.
+    /// The tab from its resting size to its grown one: flush with the screen
+    /// edge at rest, shrinking about that size's middle during a fold, so every
+    /// side moves in and the tab does not slide along the edge.
     fileprivate var tabRect: NSRect {
         let squash = panel?.tabSquash ?? 1
-        let w = (SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover) * squash
+        let baseWidth = SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover
+        let w = baseWidth * squash
         let h = (SidePanel.height + (SidePanel.hoverHeight - SidePanel.height) * hover) * squash
-        let x = panel?.side == .left ? bounds.minX : bounds.maxX - w
+        let x = panel?.side == .left
+            ? bounds.minX + (baseWidth - w) / 2
+            : bounds.maxX - (baseWidth + w) / 2
         return NSRect(
             x: x,
             y: bounds.midY - h / 2,
@@ -1470,10 +1605,11 @@ final class SidePanelTabView: NSView {
     /// The tab's rect before the mirror, always on the right edge.
     private var shapeTabRect: NSRect {
         let squash = panel?.tabSquash ?? 1
-        let w = (SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover) * squash
+        let baseWidth = SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover
+        let w = baseWidth * squash
         let h = (SidePanel.height + (SidePanel.hoverHeight - SidePanel.height) * hover) * squash
         return NSRect(
-            x: bounds.maxX - w,
+            x: bounds.maxX - (baseWidth + w) / 2,
             y: bounds.midY - h / 2,
             width: w,
             height: h
@@ -1560,6 +1696,18 @@ final class SidePanelTabInkView: NSView {
         guard let tab, tab.panel?.showsCard != true else { return }
         let rect = tab.tabRect
         let hover = tab.inkHover
+        // The marks ride the tab's own squash, so a fold shrinks the whole
+        // tab, not only the glass under marks held at their resting size.
+        let squash = tab.panel?.tabSquash ?? 1
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        if squash != 1 {
+            let shrink = NSAffineTransform()
+            shrink.translateX(by: rect.midX, yBy: rect.midY)
+            shrink.scale(by: squash)
+            shrink.translateX(by: -rect.midX, yBy: -rect.midY)
+            shrink.concat()
+        }
 
         // The grip leaves before the chevron arrives, so the hover never shows
         // both marks at once: the pointer gets one in a 150ms answer.
@@ -1610,54 +1758,177 @@ final class SidePanelTabInkView: NSView {
     }
 }
 
-/// The expanded canvas. Left corners round inward; the two corners on the
-/// screen edge are concave fillets that run smooth with the edge, so the panel
-/// reads as one piece with the side of the screen.
+/// The expanded canvas. The two free-edge corners are continuous (squircle)
+/// corners, so the card eases out of the straight edges the way the host's
+/// rounded panels do; the two concave fillets on the screen edge are plain
+/// quarter circles, so the melt meets both edges at a normal round and the
+/// panel reads as one piece with the side of the screen.
 struct SidePanelCardShape: Shape {
-    static let radius = DroppyShellMetrics.expandedIslandCornerRadius
+    /// Rounder than the host's 44pt shell corner: the card is wider than the
+    /// notch, so a corner that size reads tight against its long edges.
+    static let radius: CGFloat = 48
+    /// The screen-edge fillet's radius: a plain quarter circle, so the bend
+    /// runs this far along the card's edge and the screen edge.
     static let filletRadius: CGFloat = 32
+    /// How far a continuous corner runs along its two edges, in radii. A
+    /// circular corner meets the edge at `radius`; the squircle's transition
+    /// starts further out, so the bend has room to ease in.
+    static let cornerExtent: CGFloat = 1.528665
+    /// How far a fillet runs along the card's edges: the quarter circle's
+    /// radius.
+    static let filletExtent: CGFloat = filletRadius
 
     var cornerRadius = radius
-    var fillet = filletRadius
+    var fillet = filletExtent
+
+    /// The three cubics of one free-edge corner, from the edge along `u` to
+    /// the edge along `v`. The control points are the continuous corner
+    /// `RoundedRectangle(cornerRadius:style: .continuous)` draws, in radii.
+    static func cornerCubics(
+        at origin: CGPoint,
+        along u: CGVector,
+        across v: CGVector,
+        radius: CGFloat
+    ) -> [Cubic] {
+        let frame = CornerFrame(origin: origin, u: u, v: v, radius: radius)
+        return [
+            Cubic(
+                p0: frame.point(cornerExtent, 0),
+                p1: frame.point(1.08849, 0),
+                p2: frame.point(0.868407, 0),
+                p3: frame.point(0.631494, 0.0749114)
+            ),
+            Cubic(
+                p0: frame.point(0.631494, 0.0749114),
+                p1: frame.point(0.372824, 0.169060),
+                p2: frame.point(0.169060, 0.372824),
+                p3: frame.point(0.0749114, 0.631494)
+            ),
+            Cubic(
+                p0: frame.point(0.0749114, 0.631494),
+                p1: frame.point(0, 0.868407),
+                p2: frame.point(0, 1.08849),
+                p3: frame.point(0, cornerExtent)
+            )
+        ]
+    }
+
+    /// The three cubics of one screen-edge fillet, from `u` to `v`: the
+    /// panel's original quarter circle, split into three equal-parameter
+    /// pieces so the morph keeps its 1:1 pairing with the tab's curves.
+    static func filletCubics(
+        at corner: CGPoint,
+        along u: CGVector,
+        across v: CGVector,
+        extent: CGFloat
+    ) -> [Cubic] {
+        let frame = CornerFrame(origin: corner, u: u, v: v, radius: extent)
+        // A circle's cubic control points, in radii.
+        let k: CGFloat = 0.5523
+        let full = Cubic(
+            p0: frame.point(1, 0),
+            p1: frame.point(1 - k, 0),
+            p2: frame.point(0, 1 - k),
+            p3: frame.point(0, 1)
+        )
+        let (first, rest) = full.split(at: 1.0 / 3.0)
+        let (second, third) = rest.split(at: 0.5)
+        return [first, second, third]
+    }
 
     func path(in rect: CGRect) -> Path {
         // Clamp the fillet before finding the body, or a narrow morph leaves
         // its lower screen-edge corner short of the rect.
         let f = min(fillet, rect.width / 2, rect.height / 2)
         let body = max(0, rect.height - f * 2)
-        let r = min(cornerRadius, rect.width / 2, body / 2)
-        let k = r * 0.5523
-        let fk = f * 0.5523
+        // The squircle needs more room along the edge than a circular corner.
+        let maxExtent = min(rect.width - f, body / 2)
+        let r = min(cornerRadius, maxExtent / Self.cornerExtent)
         let top = rect.minY + f
         let bottom = top + body
+        let bottomRight = CGPoint(x: rect.maxX - f, y: bottom)
+        let topCorner = Self.cornerCubics(
+            at: CGPoint(x: rect.minX, y: top),
+            along: CGVector(dx: 1, dy: 0),
+            across: CGVector(dx: 0, dy: 1),
+            radius: r
+        )
+        let bottomCorner = Self.cornerCubics(
+            at: CGPoint(x: rect.minX, y: bottom),
+            along: CGVector(dx: 0, dy: -1),
+            across: CGVector(dx: 1, dy: 0),
+            radius: r
+        )
+        let topFillet = Self.filletCubics(
+            at: CGPoint(x: rect.maxX, y: top),
+            along: CGVector(dx: 0, dy: -1),
+            across: CGVector(dx: -1, dy: 0),
+            extent: f
+        )
+        let bottomFillet = Self.filletCubics(
+            at: CGPoint(x: rect.maxX, y: bottom),
+            along: CGVector(dx: -1, dy: 0),
+            across: CGVector(dx: 0, dy: 1),
+            extent: f
+        )
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX + r, y: top))
-        path.addLine(to: CGPoint(x: rect.maxX - f, y: top))
-        path.addCurve(
-            to: CGPoint(x: rect.maxX, y: top - f),
-            control1: CGPoint(x: rect.maxX - f + fk, y: top),
-            control2: CGPoint(x: rect.maxX, y: top - f + fk)
-        )
-        path.addLine(to: CGPoint(x: rect.maxX, y: bottom + f))
-        path.addCurve(
-            to: CGPoint(x: rect.maxX - f, y: bottom),
-            control1: CGPoint(x: rect.maxX, y: bottom + f - fk),
-            control2: CGPoint(x: rect.maxX - f + fk, y: bottom)
-        )
-        path.addLine(to: CGPoint(x: rect.minX + r, y: bottom))
-        path.addCurve(
-            to: CGPoint(x: rect.minX, y: bottom - r),
-            control1: CGPoint(x: rect.minX + r - k, y: bottom),
-            control2: CGPoint(x: rect.minX, y: bottom - r + k)
-        )
-        path.addLine(to: CGPoint(x: rect.minX, y: top + r))
-        path.addCurve(
-            to: CGPoint(x: rect.minX + r, y: top),
-            control1: CGPoint(x: rect.minX, y: top + r - k),
-            control2: CGPoint(x: rect.minX + r - k, y: top)
-        )
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        for curve in topFillet {
+            path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
+        }
+        path.addLine(to: topCorner[0].p0)
+        for curve in topCorner {
+            path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
+        }
+        path.addLine(to: bottomCorner[0].p0)
+        for curve in bottomCorner {
+            path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
+        }
+        path.addLine(to: bottomRight)
+        for curve in bottomFillet {
+            path.addCurve(to: curve.p3, control1: curve.p1, control2: curve.p2)
+        }
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         path.closeSubpath()
         return path
+    }
+
+    /// One corner's two edge directions and its radius, so the continuous
+    /// corner's control points can be written once as radii.
+    private struct CornerFrame {
+        let origin: CGPoint
+        let u: CGVector
+        let v: CGVector
+        let radius: CGFloat
+
+        func point(_ along: CGFloat, _ across: CGFloat) -> CGPoint {
+            CGPoint(
+                x: origin.x + u.dx * along * radius + v.dx * across * radius,
+                y: origin.y + u.dy * along * radius + v.dy * across * radius
+            )
+        }
+    }
+}
+
+/// The glass on the card: the card's own silhouette, plus a flare past the
+/// screen edge. The rim runs on the body's free edge, top, bottom and handle,
+/// and the flare keeps it off the two screen-edge fillets. Clipped to the card,
+/// the flare fills the fillets while the body's rim stays on the card's edge.
+struct SidePanelGlassShape: Shape {
+    /// The card's silhouette, in the surface's coordinates.
+    let silhouette: AnyShape
+    /// The surface's size, so the silhouette lands in the glass view.
+    let surfaceSize: CGSize
+    /// Where the surface's origin sits in the glass view.
+    let shift: CGSize
+    /// The flare over the screen edge, in the glass view's coordinates.
+    let flare: CGRect
+
+    func path(in rect: CGRect) -> Path {
+        let body = silhouette
+            .path(in: CGRect(origin: .zero, size: surfaceSize))
+            .applying(CGAffineTransform(translationX: shift.width, y: shift.height))
+        return body.union(Path(flare))
     }
 }
 
@@ -1688,7 +1959,7 @@ struct SidePanelUnifiedShape: Shape {
     /// on its side. At rest it sits inside the card; the pointer brings it out.
     static func lobe(in card: CGRect, amount: CGFloat) -> Path? {
         guard amount > 0.001 else { return nil }
-        let flatBottom = card.maxY - SidePanelCardShape.filletRadius
+        let flatBottom = card.maxY - SidePanelCardShape.filletExtent
         let out = SidePanelContentView.gripCurveDepth - SidePanelContentView.gripOverlap
         let bottom = flatBottom + out - SidePanelContentView.gripRise * (1 - amount)
         return SidePanelGripShape(stem: SidePanelContentView.gripTuck).path(
@@ -1749,66 +2020,79 @@ struct SidePanelMorphShape: Shape {
 
     private func tabSegments(in rect: CGRect) -> [Cubic] {
         let corners = SidePanelTabShape.corners(in: rect)
-        let topParts = corners.top.split()
-        let bottomParts = corners.bottom.split()
-        let bottomTail = bottomParts.second.split()
-        let face = Cubic.line(from: corners.top.p3, to: corners.bottom.p0).split()
-        return [
-            topParts.first, topParts.second,
-            face.first, face.second,
-            bottomParts.first, bottomTail.first, bottomTail.second,
-            .line(from: corners.bottom.p3, to: corners.top.p0)
-        ]
+        let face = Cubic.line(from: corners.top.p3, to: corners.bottom.p0)
+        let edge = Cubic.line(from: corners.bottom.p3, to: corners.top.p0)
+        // Each of the tab's curves spans one side of the card: the top and
+        // bottom curves become a fillet, an edge and a corner (seven pieces),
+        // the face becomes the card's free edge, the edge the screen edge.
+        return pieces(corners.top, count: 7)
+            + [face]
+            + pieces(corners.bottom, count: 7)
+            + [edge]
+    }
+
+    /// `count` equal-parameter pieces of one curve, for the morph's 1:1
+    /// pairing with the card's three-cubic corners and fillets.
+    private func pieces(_ curve: Cubic, count: Int) -> [Cubic] {
+        var pieces: [Cubic] = []
+        var rest = curve
+        for index in 1..<count {
+            let (first, remainder) = rest.split(at: 1.0 / CGFloat(count - index + 1))
+            pieces.append(first)
+            rest = remainder
+        }
+        pieces.append(rest)
+        return pieces
     }
 
     private func cardSegments(in rect: CGRect) -> [Cubic] {
-        let fillet = SidePanelCardShape.filletRadius
+        let fillet = SidePanelCardShape.filletExtent
         let edgeFillet = min(fillet, rect.width / 2, rect.height / 2)
         let body = max(0, rect.height - edgeFillet * 2)
-        let radius = min(SidePanelCardShape.radius, rect.width / 2, body / 2)
-        let radiusControl = radius * 0.5523
-        let filletControl = edgeFillet * 0.5523
+        let maxExtent = min(rect.width - edgeFillet, body / 2)
+        let radius = min(
+            SidePanelCardShape.radius,
+            maxExtent / SidePanelCardShape.cornerExtent
+        )
         let top = rect.minY + edgeFillet
         let bottom = top + body
+        let topCorner = SidePanelCardShape.cornerCubics(
+            at: CGPoint(x: rect.minX, y: top),
+            along: CGVector(dx: 1, dy: 0),
+            across: CGVector(dx: 0, dy: 1),
+            radius: radius
+        )
+        let bottomCorner = SidePanelCardShape.cornerCubics(
+            at: CGPoint(x: rect.minX, y: bottom),
+            along: CGVector(dx: 0, dy: -1),
+            across: CGVector(dx: 1, dy: 0),
+            radius: radius
+        )
+        let topFillet = SidePanelCardShape.filletCubics(
+            at: CGPoint(x: rect.maxX, y: top),
+            along: CGVector(dx: 0, dy: -1),
+            across: CGVector(dx: -1, dy: 0),
+            extent: edgeFillet
+        )
+        let bottomFillet = SidePanelCardShape.filletCubics(
+            at: CGPoint(x: rect.maxX, y: bottom),
+            along: CGVector(dx: -1, dy: 0),
+            across: CGVector(dx: 0, dy: 1),
+            extent: edgeFillet
+        )
 
-        let start = CGPoint(x: rect.maxX, y: rect.minY)
-        let topRight = CGPoint(x: rect.maxX - edgeFillet, y: top)
-        let topLeft = CGPoint(x: rect.minX + radius, y: top)
-        let upperLeft = CGPoint(x: rect.minX, y: top + radius)
-        let lowerLeft = CGPoint(x: rect.minX, y: bottom - radius)
-        let bottomLeft = CGPoint(x: rect.minX + radius, y: bottom)
-        let bottomRight = CGPoint(x: rect.maxX - edgeFillet, y: bottom)
-        let lowerRight = CGPoint(x: rect.maxX, y: bottom + edgeFillet)
-
-        return [
-            Cubic(
-                p0: start,
-                p1: CGPoint(x: rect.maxX, y: top - edgeFillet + filletControl),
-                p2: CGPoint(x: rect.maxX - edgeFillet + filletControl, y: top),
-                p3: topRight
-            ),
-            .line(from: topRight, to: topLeft),
-            Cubic(
-                p0: topLeft,
-                p1: CGPoint(x: rect.minX + radius - radiusControl, y: top),
-                p2: CGPoint(x: rect.minX, y: top + radius - radiusControl),
-                p3: upperLeft
-            ),
-            .line(from: upperLeft, to: lowerLeft),
-            Cubic(
-                p0: lowerLeft,
-                p1: CGPoint(x: rect.minX, y: bottom - radius + radiusControl),
-                p2: CGPoint(x: rect.minX + radius - radiusControl, y: bottom),
-                p3: bottomLeft
-            ),
-            .line(from: bottomLeft, to: bottomRight),
-            Cubic(
-                p0: bottomRight,
-                p1: CGPoint(x: rect.maxX - edgeFillet + filletControl, y: bottom),
-                p2: CGPoint(x: rect.maxX, y: bottom + edgeFillet - filletControl),
-                p3: lowerRight
-            ),
-            .line(from: lowerRight, to: start)
+        return topFillet + [
+            .line(from: topFillet[2].p3, to: topCorner[0].p0),
+            topCorner[0],
+            topCorner[1],
+            topCorner[2],
+            .line(from: topCorner[2].p3, to: bottomCorner[0].p0),
+            bottomCorner[0],
+            bottomCorner[1],
+            bottomCorner[2],
+            .line(from: bottomCorner[2].p3, to: bottomFillet[0].p0)
+        ] + bottomFillet + [
+            .line(from: bottomFillet[2].p3, to: topFillet[0].p0)
         ]
     }
 
@@ -1828,13 +2112,14 @@ struct Cubic {
         )
     }
 
-    func split() -> (first: Cubic, second: Cubic) {
-        let p01 = Self.midpoint(p0, p1)
-        let p12 = Self.midpoint(p1, p2)
-        let p23 = Self.midpoint(p2, p3)
-        let p012 = Self.midpoint(p01, p12)
-        let p123 = Self.midpoint(p12, p23)
-        let middle = Self.midpoint(p012, p123)
+    func split(at t: CGFloat) -> (first: Cubic, second: Cubic) {
+        let t = min(max(t, 0), 1)
+        let p01 = Self.mix(p0, p1, t)
+        let p12 = Self.mix(p1, p2, t)
+        let p23 = Self.mix(p2, p3, t)
+        let p012 = Self.mix(p01, p12, t)
+        let p123 = Self.mix(p12, p23, t)
+        let middle = Self.mix(p012, p123, t)
         return (
             Cubic(p0: p0, p1: p01, p2: p012, p3: middle),
             Cubic(p0: middle, p1: p123, p2: p23, p3: p3)
@@ -1848,10 +2133,6 @@ struct Cubic {
             p2: Self.mix(p2, other.p2, amount),
             p3: Self.mix(p3, other.p3, amount)
         )
-    }
-
-    private static func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
-        CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
     }
 
     private static func mix(_ a: CGPoint, _ b: CGPoint, _ amount: CGFloat) -> CGPoint {

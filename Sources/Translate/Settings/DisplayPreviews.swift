@@ -1,3 +1,4 @@
+import AppKit
 import DroppyKit
 import SwiftUI
 
@@ -60,16 +61,64 @@ private struct PreviewLook {
     var notchHeight: CGFloat
 }
 
-/// The droplet's own surface, cut to the card's outline, with black under
-/// the host's glass so it melts from black as it does on screen.
+/// The droplet's own surface, cut to the card's outline, on the preview's
+/// wallpaper stage so the glass melts from the desktop the user actually has.
+/// The side panel's picture carries the panel's own shade and dark edge.
 private struct PreviewCardFace: View {
+    let shape: AnyShape
+    var panelEdge = false
+
+    var body: some View {
+        SidePanelCardSurface(
+            shape: shape,
+            shade: panelEdge ? SidePanelCardSurface.panelShade : 0,
+            edgeOpacity: panelEdge ? SidePanelCardSurface.panelEdgeOpacity : 0,
+            keepsBodyRim: panelEdge
+        )
+    }
+}
+
+/// The host's floating-panel surface, on the preview's wallpaper stage so a
+/// glass theme melts from the desktop rather than from the settings page.
+private struct PreviewPanelFace: View {
+    var body: some View {
+        DroppyPanelSurface(cornerRadius: panelRadius)
+    }
+}
+
+/// The desktop picture behind the picture's surface. A wallpaper that is not a
+/// still image (a solid colour or an aerial) leaves the black, so the glass
+/// still has something to melt from.
+private struct WallpaperFill: View {
+    let image: NSImage?
     let shape: AnyShape
 
     var body: some View {
-        ZStack {
-            shape.fill(.black)
-            SidePanelCardSurface(shape: shape)
+        GeometryReader { geo in
+            Group {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                } else {
+                    Color.black
+                }
+            }
+            .clipShape(shape)
         }
+    }
+}
+
+/// The user's current desktop picture, read from the screen the settings
+/// window is on. Nil when the wallpaper is not a file-backed still image.
+@MainActor
+private enum DesktopWallpaper {
+    static func current() -> NSImage? {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first,
+              let url = NSWorkspace.shared.desktopImageURL(for: screen)
+        else { return nil }
+        return NSImage(contentsOf: url)
     }
 }
 
@@ -79,9 +128,15 @@ struct ResultDisplayPreview: View {
     let display: ResultDisplay
     @ObservedObject var model: TranslateModel
 
-    /// One stage for every picture, so switching the place never changes how
-    /// large the example reads. Its width is the settings column's worth.
+    /// The widest a picture draws; the stage around it fills the settings
+    /// column, so every place reads at one size.
     static let stageWidth: CGFloat = 440
+    /// The air the picture keeps above and below it on the stage.
+    private static let stageAir: CGFloat = 20
+    /// The stage's free corners; the screen edge stays square.
+    private static let stageRadius: CGFloat = DroppyRadius.lx
+
+    @State private var wallpaper: NSImage?
 
     var body: some View {
         let preview = PreviewSample.widgetModel(model)
@@ -94,6 +149,7 @@ struct ResultDisplayPreview: View {
         )
         let width = Self.surfaceWidth(display, model: preview, look: look)
         let scale = Self.scale(forWidth: width)
+        let height = Self.surfaceHeight(display, model: preview, look: look)
         // The edge panel hangs from a screen edge, so the picture sits on the
         // stage's own edge instead of floating away from it.
         let edge: Alignment = display == .sidePanel
@@ -103,11 +159,37 @@ struct ResultDisplayPreview: View {
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             // Scale after layout so the shell and its contents keep their
-            // proportions together. The anchor keeps the picture's top edge
-            // where it was, so the row below it stays put.
-            .scaleEffect(scale, anchor: .top)
-            .frame(width: width * scale, alignment: .top)
+            // proportions together.
+            .scaleEffect(scale, anchor: .center)
+            .frame(width: width * scale, height: height * scale, alignment: .top)
+            .padding(.vertical, Self.stageAir)
             .frame(maxWidth: .infinity, alignment: edge)
+            // Every surface shares one stage, so the wallpaper behind the
+            // examples is the same size whichever destination is chosen.
+            .frame(height: Self.stageHeight(model: preview, look: look), alignment: .center)
+            // The stage fills the settings column, so the wallpaper shows
+            // around the picture instead of only under it.
+            .background {
+                WallpaperFill(image: wallpaper, shape: stageShape(look: look))
+            }
+            .onAppear {
+                if wallpaper == nil { wallpaper = DesktopWallpaper.current() }
+            }
+    }
+
+    /// The stage's outline: a card, with the side panel's screen edge square.
+    private func stageShape(look: PreviewLook) -> AnyShape {
+        guard display == .sidePanel else {
+            return AnyShape(RoundedRectangle(cornerRadius: Self.stageRadius, style: .continuous))
+        }
+        let radius = Self.stageRadius
+        return AnyShape(UnevenRoundedRectangle(
+            topLeadingRadius: look.side == .left ? 0 : radius,
+            bottomLeadingRadius: look.side == .left ? 0 : radius,
+            bottomTrailingRadius: look.side == .left ? radius : 0,
+            topTrailingRadius: look.side == .left ? 0 : radius,
+            style: .continuous
+        ))
     }
 
     private static func surfaceWidth(_ display: ResultDisplay, model: TranslateModel, look: PreviewLook) -> CGFloat {
@@ -120,15 +202,48 @@ struct ResultDisplayPreview: View {
         }
     }
 
-    /// The picture fills the stage's width; no picture is ever widened past
-    /// its own pixels.
+    /// The picture's own height; the stage below takes the tallest of the
+    /// three, so switching destination never changes the wallpaper's size.
+    @MainActor
+    private static func surfaceHeight(
+        _ display: ResultDisplay,
+        model: TranslateModel,
+        look: PreviewLook
+    ) -> CGFloat {
+        switch display {
+        case .normal:
+            let widget = ShelfWidgetSurfacePreview.widgetSize(for: model, look: look)
+            return ShelfWidgetSurfacePreview.previewSize(widgetSize: widget, look: look).height
+        case .panel:
+            return PreviewSample.bodyHeight(model)
+        case .sidePanel:
+            return SidePanel.cardHeight(forBody: PreviewSample.bodyHeight(model))
+        }
+    }
+
+    /// The one stage all three surfaces share, in the current look and page,
+    /// so the wallpaper is drawn at the same size in every picture.
+    @MainActor
+    private static func stageHeight(model: TranslateModel, look: PreviewLook) -> CGFloat {
+        ResultDisplay.allCases.reduce(Self.stageAir * 2) { tallest, display in
+            let width = surfaceWidth(display, model: model, look: look)
+            let height = surfaceHeight(display, model: model, look: look)
+            return max(tallest, height * scale(forWidth: width) + Self.stageAir * 2)
+        }
+    }
+
+    /// No picture draws wider than the column's worth; the stage around it
+    /// fills the column.
     private static func scale(forWidth width: CGFloat) -> CGFloat {
         guard width > 0 else { return 1 }
         return min(1, stageWidth / width)
     }
 
     @ViewBuilder
-    private func drawing(_ preview: TranslateModel, look: PreviewLook) -> some View {
+    private func drawing(
+        _ preview: TranslateModel,
+        look: PreviewLook
+    ) -> some View {
         switch display {
         case .normal:
             ShelfWidgetSurfacePreview(model: preview, look: look)
@@ -161,12 +276,8 @@ private struct FloatingSurfacePreview: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            PreviewCardFace(
-                shape: AnyShape(
-                    RoundedRectangle(cornerRadius: panelRadius, style: .continuous)
-                )
-            )
-            .frame(width: cardSize.width, height: cardSize.height)
+            PreviewPanelFace()
+                .frame(width: cardSize.width, height: cardSize.height)
             FloatingPanelBody(
                 model: model,
                 chip: chip,
@@ -238,7 +349,7 @@ private struct SidePanelSurfacePreview: View {
             .frame(width: contentSize.width, height: contentSize.height, alignment: .topLeading)
             .offset(
                 x: SidePanelContentView.sideInset,
-                y: SidePanelCardShape.filletRadius + SidePanelContentView.inset
+                y: SidePanelCardShape.filletExtent + SidePanelContentView.inset
             )
         }
         // The panel's chrome is Droppy's dark glass, whatever the system is set
@@ -251,7 +362,8 @@ private struct SidePanelSurfacePreview: View {
     /// mirrored: it is already laid out for either side.
     private var card: some View {
         PreviewCardFace(
-            shape: AnyShape(SidePanelUnifiedShape(reveal: 1, stretch: 1))
+            shape: AnyShape(SidePanelUnifiedShape(reveal: 1, stretch: 1)),
+            panelEdge: true
         )
         .frame(width: cardSize.width, height: cardSize.height, alignment: .topLeading)
         .scaleEffect(x: look.side == .left ? -1 : 1, y: 1)
@@ -283,7 +395,7 @@ private struct ShelfWidgetSurfacePreview: View {
     static func widgetSize(for model: TranslateModel, look: PreviewLook) -> CGSize {
         CGSize(
             width: widgetWidth,
-            height: contentHeight(for: model) + verticalInset(look) * 2
+            height: contentHeight(for: model) + SidePanelContentView.shelfContentInsetBudget
         )
     }
 
@@ -306,7 +418,11 @@ private struct ShelfWidgetSurfacePreview: View {
         Self.previewSize(widgetSize: Self.widgetSize(for: model, look: look), look: look)
     }
 
-    private var contentHeight: CGFloat { Self.contentHeight(for: model) }
+    /// The room inside the widget's own padding: the whole rectangle less the
+    /// 8pt it keeps top and bottom under a notch.
+    private var contentHeight: CGFloat {
+        Self.widgetSize(for: model, look: look).height - Self.verticalInset(look) * 2
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
