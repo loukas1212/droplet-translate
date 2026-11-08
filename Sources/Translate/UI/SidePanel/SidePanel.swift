@@ -1583,17 +1583,14 @@ final class SidePanelTabView: NSView {
         )
     }
 
-    /// The tab from its resting size to its grown one: flush with the screen
-    /// edge at rest, shrinking about that size's middle during a fold, so every
-    /// side moves in and the tab does not slide along the edge.
+    /// The tab from its resting size to its grown one, flush with the screen
+    /// edge and centred on the tab's own middle. A fold shrinks it from the
+    /// free edge and the two ends; the screen edge never moves.
     fileprivate var tabRect: NSRect {
         let squash = panel?.tabSquash ?? 1
-        let baseWidth = SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover
-        let w = baseWidth * squash
+        let w = (SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover) * squash
         let h = (SidePanel.height + (SidePanel.hoverHeight - SidePanel.height) * hover) * squash
-        let x = panel?.side == .left
-            ? bounds.minX + (baseWidth - w) / 2
-            : bounds.maxX - (baseWidth + w) / 2
+        let x = panel?.side == .left ? bounds.minX : bounds.maxX - w
         return NSRect(
             x: x,
             y: bounds.midY - h / 2,
@@ -1605,11 +1602,10 @@ final class SidePanelTabView: NSView {
     /// The tab's rect before the mirror, always on the right edge.
     private var shapeTabRect: NSRect {
         let squash = panel?.tabSquash ?? 1
-        let baseWidth = SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover
-        let w = baseWidth * squash
+        let w = (SidePanel.width + (SidePanel.hoverWidth - SidePanel.width) * hover) * squash
         let h = (SidePanel.height + (SidePanel.hoverHeight - SidePanel.height) * hover) * squash
         return NSRect(
-            x: bounds.maxX - (baseWidth + w) / 2,
+            x: bounds.maxX - w,
             y: bounds.midY - h / 2,
             width: w,
             height: h
