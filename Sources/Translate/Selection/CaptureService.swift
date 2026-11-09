@@ -70,6 +70,11 @@ private final class OCRCompletion: @unchecked Sendable {
     }
 }
 
+private struct OCRLine {
+    let string: String
+    let box: CGRect
+}
+
 /// Permission gate, region pick, screenshot and OCR. Owns no UI.
 @MainActor
 final class CaptureService {
@@ -367,7 +372,7 @@ final class CaptureService {
         }
     }
 
-    /// Accurate model, lines ordered top to bottom like the reference engine.
+    /// Accurate model, lines ordered top to bottom and grouped into paragraphs.
     private nonisolated static func recognize(
         image: CGImage,
         languageID: String?,
@@ -390,14 +395,36 @@ final class CaptureService {
             completion.finish(nil)
             return
         }
-        let text = observations
-            .sorted {
-                let dy = abs($0.boundingBox.midY - $1.boundingBox.midY)
-                if dy > 0.02 { return $0.boundingBox.midY > $1.boundingBox.midY }
-                return $0.boundingBox.midX < $1.boundingBox.midX
+        let lines = observations
+            .compactMap { observation -> OCRLine? in
+                guard let candidate = observation.topCandidates(1).first else { return nil }
+                return OCRLine(string: candidate.string, box: observation.boundingBox)
             }
-            .compactMap { $0.topCandidates(1).first?.string }
-            .joined(separator: "\n")
+            .sorted {
+                let dy = abs($0.box.midY - $1.box.midY)
+                if dy > 0.02 { return $0.box.midY > $1.box.midY }
+                return $0.box.midX < $1.box.midX
+            }
+        guard !lines.isEmpty else {
+            completion.finish(nil)
+            return
+        }
+        // A paragraph break is a gap of roughly one line height; wrapped lines
+        // inside a paragraph sit much tighter.
+        let medianHeight = lines.map(\.box.height).sorted()[lines.count / 2]
+        var paragraphs: [[String]] = []
+        var current: [String] = [lines[0].string]
+        for (previous, line) in zip(lines, lines.dropFirst()) {
+            if previous.box.minY - line.box.maxY > medianHeight * 0.6 {
+                paragraphs.append(current)
+                current = [line.string]
+            } else {
+                current.append(line.string)
+            }
+        }
+        paragraphs.append(current)
+        // The reference app collapses wrapped lines inside a paragraph.
+        let text = paragraphs.map { $0.joined(separator: " ") }.joined(separator: "\n\n")
         completion.finish(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text)
     }
 
