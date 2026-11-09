@@ -241,11 +241,11 @@ struct TranslationOutputScrollView: NSViewRepresentable {
         textView.textContainer?.lineFragmentPadding = 0
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.heightTracksTextView = false
-        textView.textContainer?.lineBreakMode = .byCharWrapping
+        textView.textContainer?.lineBreakMode = .byWordWrapping
         let paragraph = NSMutableParagraphStyle()
         paragraph.firstLineHeadIndent = 5
         paragraph.headIndent = 5
-        paragraph.lineBreakMode = .byCharWrapping
+        paragraph.lineBreakMode = .byWordWrapping
         textView.defaultParagraphStyle = paragraph
         textView.font = .systemFont(ofSize: fontSize)
         textView.textColor = PanelTileText.ink

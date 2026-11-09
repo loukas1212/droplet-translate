@@ -518,7 +518,7 @@ struct SidePanelContentView: View {
         let paragraph = NSMutableParagraphStyle()
         paragraph.firstLineHeadIndent = 5
         paragraph.headIndent = 5
-        paragraph.lineBreakMode = .byCharWrapping
+        paragraph.lineBreakMode = .byWordWrapping
         let bounds = (text as NSString).boundingRect(
             with: NSSize(width: width, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
