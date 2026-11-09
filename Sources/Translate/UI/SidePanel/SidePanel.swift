@@ -315,16 +315,29 @@ final class SidePanel: NSPanel {
     /// and settles by 0.4s.
     static let foldDuration: CFTimeInterval = 0.4
 
+    /// The bloom's spring, lightly damped: the card swells about 7% past
+    /// itself. The beats were tuned on a 0.8s clock: the swell at 0.30s, the
+    /// dip at 0.61s.
+    private static let bloomDamping: CGFloat = 0.65
+    /// The period that puts the swell at about a third of the open.
+    private static let bloomPeriod: CGFloat = 0.46
+    private static let bloomTunedDuration: CGFloat = 0.8
+
+    /// Where the spring turns: its first extremum, π over the damped frequency,
+    /// as a phase of the tuned clock.
+    private static let bloomPeakPhase: CGFloat = {
+        let frequency = 2 * CGFloat.pi / bloomPeriod
+        let damped = frequency * sqrt(1 - bloomDamping * bloomDamping)
+        return (CGFloat.pi / damped) / bloomTunedDuration
+    }()
+
     /// The shared open, in phase: a lightly damped spring. The card starts
     /// from rest, swells about 7% past itself, dips about half a percent under
     /// it and comes back. The beats were tuned on a 0.8s clock: the swell at
     /// 0.30s, the dip at 0.61s; a surface plays the same phases on its own.
     static func bloomShape(_ phase: CGFloat) -> CGFloat {
-        let damping: CGFloat = 0.65
-        // The period that puts the swell at about a third of the open.
-        let period: CGFloat = 0.46
-        let tunedDuration: CGFloat = 0.8
-        let frequency = 2 * CGFloat.pi / period
+        let damping = bloomDamping
+        let frequency = 2 * CGFloat.pi / bloomPeriod
         let damped = frequency * sqrt(1 - damping * damping)
         let ratio = damping / sqrt(1 - damping * damping)
         func value(at time: CGFloat) -> CGFloat {
@@ -333,7 +346,7 @@ final class SidePanel: NSPanel {
         }
         guard phase > 0 else { return 0 }
         guard phase < 1 else { return 1 }
-        return value(at: phase * tunedDuration)
+        return value(at: phase * bloomTunedDuration)
     }
 
     /// The card's share of its size partway through a fold, from the card at 1
@@ -465,6 +478,18 @@ final class SidePanel: NSPanel {
     var showsCard: Bool { reveal > 0 }
     var cardReveal: CGFloat { min(max(reveal, 0), 1) }
     var visibleStretch: CGFloat { max(reveal, 1) }
+    /// True on the open's falling side, past the swell: the window takes the
+    /// card's frame and the card draws the dip inside it. Resizing the window
+    /// there rounds every tick to the server's points, which reads as a shake.
+    /// The rising side and the fold still morph the window from the tab.
+    private var cardCarriesDip: Bool {
+        revealTarget == 1 && bloomPhase > Self.bloomPeakPhase && reveal <= 1
+    }
+    /// How much of its size the card draws: the open's dip under the card,
+    /// while the window keeps the card's frame. 1 everywhere else.
+    var cardDip: CGFloat {
+        cardCarriesDip ? reveal : 1
+    }
     /// 1 on the resting tab, below 1 while the fold settles out of the squash
     /// it runs past the tab.
     var tabSquash: CGFloat { min(1 + min(reveal, 0), 1) }
@@ -890,8 +915,9 @@ final class SidePanel: NSPanel {
             ),
             from: tabView
         )
+        let dip = cardDip
         let transform = CGAffineTransform(translationX: faceAnchor.x, y: faceAnchor.y)
-            .scaledBy(x: faceWidth / Self.expandedWidth, y: faceHeight / finalFaceHeight)
+            .scaledBy(x: faceWidth / Self.expandedWidth * dip, y: faceHeight / finalFaceHeight * dip)
             .translatedBy(x: -faceAnchor.x, y: -faceAnchor.y)
         content.layer?.setAffineTransform(transform)
         CATransaction.commit()
@@ -1084,7 +1110,9 @@ final class SidePanel: NSPanel {
         let tab = collapsedFrame()
         guard reveal > 0 else { return tab }
         let card = cardFrame(keepingTop: keepingTop)
-        guard reveal != 1 else { return card }
+        // The dip under the card is drawn into the card's frame, not resized
+        // into the window.
+        if cardCarriesDip { return card }
         return Self.revealRect(from: tab, to: card, at: reveal, side: side)
     }
 
@@ -1569,17 +1597,27 @@ final class SidePanelTabView: NSView {
         )
     }
 
-    /// The card's face in the tab view's coordinates, before the mirror.
+    /// The card's face in the tab view's coordinates, before the mirror. The
+    /// dip under the card is drawn here, inside the card's frame, so the window
+    /// never carries it.
     private var shapeCardRect: NSRect {
         // The hit window starts wider than the tab; the face catches up with
         // the tab's current size as the same silhouette morphs into the card.
         let tabWidth = panel?.tabWidth ?? SidePanel.hoverWidth
         let leadingInset = (SidePanel.windowWidth - tabWidth) * (1 - (panel?.cardReveal ?? 0))
-        return NSRect(
+        let rect = NSRect(
             x: bounds.minX + leadingInset,
             y: bounds.minY,
             width: bounds.width - leadingInset,
             height: panel?.faceHeight ?? 0
+        )
+        let dip = panel?.cardDip ?? 1
+        guard dip < 1 else { return rect }
+        return NSRect(
+            x: rect.maxX - rect.width * dip,
+            y: rect.midY - rect.height * dip / 2,
+            width: rect.width * dip,
+            height: rect.height * dip
         )
     }
 
