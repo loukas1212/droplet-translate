@@ -100,13 +100,13 @@ final class SidePanelChipState: ObservableObject {
         AdaptiveColors.selectionBlueAuto.opacity(pressed ? 0.55 : 0.40)
     }
 
-    /// The wash a box holds while it has words. Dynamic Glass lights the input
-    /// from white and the result from black; Black keeps both white. Liquid
-    /// Glass follows the system's scheme, like the glass under it.
-    static func boxWash(_ box: SidePanelChipTarget, theme: HostTheme) -> Color {
+    /// The wash a box holds while it has words. Dynamic Glass darkens both
+    /// boxes with black; Black keeps both white. Liquid Glass follows the
+    /// system's scheme, like the glass under it.
+    static func boxWash(theme: HostTheme) -> Color {
         switch theme {
         case .dynamicGlass:
-            return (box == .result ? Color.black : Color.white).opacity(0.20)
+            return Color.black.opacity(0.20)
         case .black:
             return Color.white.opacity(0.20)
         case .liquidGlass:

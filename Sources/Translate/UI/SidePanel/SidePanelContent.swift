@@ -1080,7 +1080,7 @@ struct SidePanelContentView: View {
         // can never push its neighbours.
         .background {
             if resultReveal >= 1, !model.output.isEmpty {
-                outline.fill(SidePanelChipState.boxWash(.result, theme: hostTheme.current))
+                outline.fill(SidePanelChipState.boxWash(theme: hostTheme.current))
             }
         }
         // The rim the glass draws is the rim the words live in: a rect clip
@@ -1461,7 +1461,7 @@ struct SidePanelContentView: View {
     /// system's black or white over the glass. It follows the box while a new
     /// line grows it, on the box's own clock.
     private func boxWashFill(_ shape: AnyShape, in rect: CGRect) -> some View {
-        shape.fill(SidePanelChipState.boxWash(.input, theme: hostTheme.current))
+        shape.fill(SidePanelChipState.boxWash(theme: hostTheme.current))
             .frame(width: rect.width, height: rect.height)
             .offset(x: rect.minX, y: rect.minY)
             .animation(DroppyAnimation.state, value: rect)
