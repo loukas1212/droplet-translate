@@ -162,6 +162,8 @@ enum TranslationEngines {
         if provider.needsKey, key?.isEmpty != false { throw EngineError.notConfigured }
         guard configuration.endpoint(for: provider) != nil else { throw EngineError.notConfigured }
 
+        // One request per line keeps the answer's line breaks, so a long
+        // capture costs one request per line.
         let chunks = TextChunker.split(request.text, maxChars: chunkSize)
         guard chunks.count > 1 else {
             return try await send(

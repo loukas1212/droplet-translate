@@ -214,6 +214,11 @@ away again is not in it.
   card, to translate it.
 - Capture a region of the screen and read it, or pull the text another app has
   selected, with a clipboard fallback when the selection cannot be read.
+- A capture keeps the layout it read: a list item, a menu entry or a table row
+  stays on its own line, a gap of a line starts a new paragraph, and only a
+  line that wrapped in the original joins the line above it.
+- The translation keeps that shape too: a list stays a list, a menu row stays
+  one row, and the paragraphs break where the original did.
 - The more disc in the footer holds capture, select, pin and settings. Its menu
   opens above the disc, which keeps its place and turns its dots upright while
   the menu is open; the hover mark is the disc's own size. The pin holds the

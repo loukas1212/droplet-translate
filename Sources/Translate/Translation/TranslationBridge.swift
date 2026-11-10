@@ -407,12 +407,50 @@ struct TextChunk: Sendable {
     let trailing: String
 }
 
-/// Splits long text at sentence boundaries, falling back to words, so the
-/// engine gets short pieces and results can arrive one by one.
+/// Splits text into pieces the engine can answer one at a time, keeping the
+/// source's line breaks so the result has the same shape. A line is one piece;
+/// a line longer than `maxChars` is split again at sentence and word
+/// boundaries, so results can still arrive one by one.
 enum TextChunker {
     static let maxChars = 500
 
     static func split(_ text: String, maxChars: Int = TextChunker.maxChars) -> [TextChunk] {
+        guard text.contains(where: \.isNewline) else {
+            return splitSentences(text, maxChars: maxChars)
+        }
+        var chunks: [TextChunk] = []
+        // Whitespace since the last line: a newline, or the blank lines
+        // between paragraphs. It goes back after the line before it.
+        var gap = ""
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        for (index, line) in lines.enumerated() {
+            if line.allSatisfy(\.isWhitespace) {
+                gap += String(line) + (index < lines.count - 1 ? "\n" : "")
+                continue
+            }
+            if !gap.isEmpty, let previous = chunks.last {
+                chunks[chunks.count - 1] = TextChunk(
+                    text: previous.text,
+                    trailing: previous.trailing + gap
+                )
+                gap = ""
+            }
+            chunks.append(contentsOf: splitSentences(String(line), maxChars: maxChars))
+            gap = index < lines.count - 1 ? "\n" : ""
+        }
+        if !gap.isEmpty, let previous = chunks.last {
+            chunks[chunks.count - 1] = TextChunk(
+                text: previous.text,
+                trailing: previous.trailing + gap
+            )
+        }
+        assert(chunks.map { $0.text + $0.trailing }.joined() == text)
+        assert(chunks.allSatisfy { !$0.text.isEmpty && $0.text.count <= maxChars })
+        return chunks
+    }
+
+    /// The line's own text, split at sentence boundaries when it is too long.
+    private static func splitSentences(_ text: String, maxChars: Int) -> [TextChunk] {
         guard text.count > maxChars else { return [TextChunk(text: text, trailing: "")] }
 
         var pieces: [Range<String.Index>] = []
@@ -477,5 +515,20 @@ enum TextChunker {
         assert(chunks.map { $0.text + $0.trailing }.joined() == text)
         assert(chunks.allSatisfy { !$0.text.isEmpty && $0.text.count <= maxChars })
         return chunks
+    }
+
+    /// A line stays one piece and the whitespace between lines comes back
+    /// unchanged, blank lines included.
+    static func checkLayoutRules() {
+        let list = split("• One\n• Two")
+        assert(list.count == 2)
+        assert(list[0].text == "• One" && list[0].trailing == "\n")
+        assert(list[1].text == "• Two" && list[1].trailing == "")
+        assert(list.map { $0.text + $0.trailing }.joined() == "• One\n• Two")
+
+        let paragraphs = split("One\n\nTwo")
+        assert(paragraphs.count == 2)
+        assert(paragraphs[0].trailing == "\n\n")
+        assert(paragraphs.map { $0.text + $0.trailing }.joined() == "One\n\nTwo")
     }
 }

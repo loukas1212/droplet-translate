@@ -32,6 +32,8 @@ public final class TranslateDroplet: NSObject, ObservableObject, Droplet {
     public func activate(host: DropletHost) throws {
         LanguageTools.checkLanguageIDRules()
         TranslateModel.checkPinReleaseRules()
+        CaptureService.checkOCRLayoutRules()
+        TextChunker.checkLayoutRules()
         self.host = host
         model.attach(host: host)
         capture.attach(host: host, model: model)
